@@ -1,0 +1,56 @@
+name: Build CurrentSense iOS (unsigned)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "CurrentSense/**"
+      - ".github/workflows/build-ios.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          xcodebuild -version
+          xcodebuild -list -project CurrentSense/CurrentSense.xcodeproj
+
+      - name: Build unsigned iOS app
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project CurrentSense/CurrentSense.xcodeproj \
+            -scheme CurrentSense \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath "$RUNNER_TEMP/CurrentSenseDerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package unsigned IPA for later signing
+        run: |
+          APP_PATH="$RUNNER_TEMP/CurrentSenseDerivedData/Build/Products/Release-iphoneos/CurrentSense.app"
+          test -d "$APP_PATH"
+          mkdir -p "$RUNNER_TEMP/ipa/Payload"
+          cp -R "$APP_PATH" "$RUNNER_TEMP/ipa/Payload/CurrentSense.app"
+          cd "$RUNNER_TEMP/ipa"
+          /usr/bin/zip -qry "$GITHUB_WORKSPACE/CurrentSense-unsigned.ipa" Payload
+          test -s "$GITHUB_WORKSPACE/CurrentSense-unsigned.ipa"
+
+      - name: Upload unsigned IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CurrentSense-unsigned-IPA
+          path: CurrentSense-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 7
