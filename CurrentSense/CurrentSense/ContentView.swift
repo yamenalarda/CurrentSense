@@ -53,11 +53,7 @@ struct ContentView: View {
     }
 
     private var observedSampleRate: Double? {
-        guard sensor.samples.count >= 2,
-              let first = sensor.samples.first, let last = sensor.samples.last else { return nil }
-        let duration = last.timestamp.timeIntervalSince(first.timestamp)
-        guard duration > 0 else { return nil }
-        return Double(sensor.samples.count - 1) / duration
+        sensor.observedDeliveryRateHz
     }
 
     var body: some View {
