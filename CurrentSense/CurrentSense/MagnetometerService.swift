@@ -37,6 +37,7 @@ final class MagnetometerService: ObservableObject {
     }()
 
     private let maximumStoredSamples = 20_000
+    private let maximumChartSamples = 5_000
     private let uiPublishInterval: TimeInterval = 0.10
     private var rawSamples: [MagneticSample] = []
     private var lastUIPublish: Date = .distantPast
@@ -110,7 +111,10 @@ final class MagnetometerService: ObservableObject {
                 self.latestSample = sample
                 let now = Date()
                 if now.timeIntervalSince(self.lastUIPublish) >= self.uiPublishInterval {
-                    self.samples = self.rawSamples
+                    self.samples.append(sample)
+                    if self.samples.count > self.maximumChartSamples {
+                        self.samples.removeFirst(self.samples.count - self.maximumChartSamples)
+                    }
                     self.lastUIPublish = now
                 }
             }
@@ -121,8 +125,13 @@ final class MagnetometerService: ObservableObject {
     func stop() {
         motionManager.stopMagnetometerUpdates()
         isRunning = false
-        // Publish the final batch so the chart and CSV count stay consistent.
-        samples = rawSamples
+        // Preserve the latest point on pause without copying the full raw recording.
+        if let latestSample, samples.last?.id != latestSample.id {
+            samples.append(latestSample)
+            if samples.count > maximumChartSamples {
+                samples.removeFirst(samples.count - maximumChartSamples)
+            }
+        }
     }
 
     func clearSamples() {
