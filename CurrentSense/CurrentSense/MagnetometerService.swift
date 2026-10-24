@@ -4,15 +4,15 @@ import Combine
 
 struct MagneticSample: Identifiable {
     let id = UUID()
-    /// Wall-clock time when Core Motion delivered this sample to the app.
+    /// Wall-clock time mapped from Core Motion's monotonic timestamp.
     let timestamp: Date
-    /// Calibrated magnetic-field components in microtesla, when available.
+    /// Calibrated magnetic-field components in microtesla.
     let x: Double
     let y: Double
     let z: Double
-    /// Total calibrated field magnitude, including Earth's field.
+    /// Total field magnitude, including the Earth's field.
     let magnitude: Double
-    /// Vector change from the averaged start baseline. Nil while the baseline is being captured.
+    /// Vector difference from the baseline captured when monitoring started.
     let deltaMagnitude: Double?
     let calibrationQuality: String
 
@@ -26,7 +26,11 @@ struct MagneticSample: Identifiable {
 @MainActor
 final class MagnetometerService: ObservableObject {
     @Published private(set) var isAvailable = false
+    /// True only while the user has requested a measurement session.
     @Published private(set) var isRunning = false
+    /// Low-rate magnetic monitoring used to animate the idle glass orb.
+    @Published private(set) var isMonitoring = false
+    @Published private(set) var magneticSourceDetected = false
     @Published private(set) var latestSample: MagneticSample?
     @Published private(set) var samples: [MagneticSample] = []
     @Published private(set) var errorMessage: String?
@@ -48,6 +52,9 @@ final class MagnetometerService: ObservableObject {
     private let uiPublishInterval: TimeInterval = 0.10
     private let baselineCaptureDuration: TimeInterval = 2.0
     private let minimumBaselineSamples = 10
+    private let standbyUpdateInterval: TimeInterval = 1.0 / 10.0
+    private let measurementUpdateInterval: TimeInterval = 1.0 / 100.0
+
     private var rawSamples: [MagneticSample] = []
     private var lastUIPublish: Date = .distantPast
     private var lastDeliveryTimestamp: TimeInterval?
@@ -58,53 +65,122 @@ final class MagnetometerService: ObservableObject {
     private var baselineSumX = 0.0
     private var baselineSumY = 0.0
     private var baselineSumZ = 0.0
+    private var baselineMagnitudeSum = 0.0
+    private var baselineMagnitudeSquareSum = 0.0
     private var baselineX: Double?
     private var baselineY: Double?
     private var baselineZ: Double?
+    private var baselineMagnitude: Double?
+    private var baselineMagnitudeDeviation = 0.0
+    private var candidateAboveCount = 0
+    private var clearBelowCount = 0
 
     init() {
         isAvailable = motionManager.isDeviceMotionAvailable && motionManager.isMagnetometerAvailable
     }
 
-    func start() {
+    /// Starts low-rate monitoring so the idle orb can react to a stable field change.
+    /// The detector estimates a nearby magnetic anomaly; it cannot prove cable contact.
+    func startMonitoring() {
+        guard !isMonitoring else { return }
         guard motionManager.isDeviceMotionAvailable && motionManager.isMagnetometerAvailable else {
             errorMessage = "Device motion or magnetometer is unavailable on this device."
             isAvailable = false
             return
         }
-        guard !isRunning else { return }
 
         errorMessage = nil
+        isAvailable = true
+        isMonitoring = true
+        resetBaseline()
+        lastDeliveryTimestamp = nil
+        smoothedDeliveryRateHz = nil
+        lastUIPublish = .distantPast
+        motionManager.deviceMotionUpdateInterval = standbyUpdateInterval
+        startMotionUpdates()
+    }
+
+    /// Starts a measurement session without throwing away the standby baseline.
+    /// If the phone is already near a magnetic source, the live delta is preserved.
+    func start() {
+        guard isAvailable else {
+            startMonitoring()
+            guard isAvailable else { return }
+            // Monitoring now starts asynchronously; measurement state can still begin.
+            // The baseline will continue to capture until the required window is complete.
+            isRunning = true
+            motionManager.deviceMotionUpdateInterval = measurementUpdateInterval
+            return
+        }
+        guard !isRunning else { return }
+
+        if !isMonitoring {
+            startMonitoring()
+        }
+        guard isMonitoring else { return }
+
         rawSamples.removeAll(keepingCapacity: true)
         samples.removeAll(keepingCapacity: true)
-        latestSample = nil
         lastUIPublish = .distantPast
         lastDeliveryTimestamp = nil
-        observedDeliveryRateHz = nil
         smoothedDeliveryRateHz = nil
+        observedDeliveryRateHz = nil
+        isRunning = true
+        motionManager.deviceMotionUpdateInterval = measurementUpdateInterval
+    }
+
+    /// Ends the measurement, but leaves low-rate monitoring active for the idle orb.
+    func stop() {
+        guard isRunning else { return }
+        isRunning = false
+        motionManager.deviceMotionUpdateInterval = standbyUpdateInterval
+        if let latestSample, samples.last?.id != latestSample.id {
+            samples.append(latestSample)
+            if samples.count > maximumChartSamples {
+                samples.removeFirst(max(1, maximumChartSamples / 100))
+            }
+        }
+    }
+
+    /// Stops sensor use when the screen goes away.
+    func stopMonitoring() {
+        motionManager.stopDeviceMotionUpdates()
+        isRunning = false
+        isMonitoring = false
+        magneticSourceDetected = false
+    }
+
+    private func resetBaseline() {
         baselineCaptured = false
-        calibrationQuality = "Unknown"
         baselineStartTimestamp = nil
         baselineStartWallClock = nil
         baselineSampleCount = 0
         baselineSumX = 0
         baselineSumY = 0
         baselineSumZ = 0
+        baselineMagnitudeSum = 0
+        baselineMagnitudeSquareSum = 0
         baselineX = nil
         baselineY = nil
         baselineZ = nil
+        baselineMagnitude = nil
+        baselineMagnitudeDeviation = 0
+        candidateAboveCount = 0
+        clearBelowCount = 0
+        magneticSourceDetected = false
+        latestSample = nil
+        calibrationQuality = "Unknown"
+    }
 
-        // Request 100 Hz to improve time resolution. Core Motion and the device
-        // hardware may deliver less; observedDeliveryRateHz reports the actual rate.
-        // This does not make mains-frequency AC current measurement reliable by itself.
-        motionManager.deviceMotionUpdateInterval = 1.0 / 100.0
+    private func startMotionUpdates() {
         motionManager.startDeviceMotionUpdates(using: .xArbitraryCorrectedZVertical,
-                                              to: queue) { [weak self] motion, error in
+                                               to: queue) { [weak self] motion, error in
             if let error {
                 Task { @MainActor in
                     guard let self else { return }
                     self.errorMessage = "Motion update failed: \(error.localizedDescription)"
-                    self.stop()
+                    self.isAvailable = false
+                    self.stopMonitoring()
                 }
                 return
             }
@@ -115,6 +191,7 @@ final class MagnetometerService: ObservableObject {
             let y = field.y
             let z = field.z
             guard x.isFinite, y.isFinite, z.isFinite else { return }
+
             let deliveryTimestamp = motion.timestamp
             let deliveryWallClock = Date()
             let calibrationQuality: String
@@ -127,7 +204,7 @@ final class MagnetometerService: ObservableObject {
             }
 
             Task { @MainActor in
-                guard let self, self.isRunning else { return }
+                guard let self, self.isMonitoring else { return }
                 if self.calibrationQuality != calibrationQuality {
                     self.calibrationQuality = calibrationQuality
                 }
@@ -144,26 +221,13 @@ final class MagnetometerService: ObservableObject {
                     sampleTimestamp = deliveryWallClock
                 }
 
-                // Average the first two seconds as an environmental reference.
-                // Start with the phone away from the cable, then move it close when ready.
-                if !self.baselineCaptured {
-                    self.baselineSumX += x
-                    self.baselineSumY += y
-                    self.baselineSumZ += z
-                    self.baselineSampleCount += 1
-
-                    let elapsed = deliveryTimestamp - (self.baselineStartTimestamp ?? deliveryTimestamp)
-                    if elapsed >= self.baselineCaptureDuration &&
-                       self.baselineSampleCount >= self.minimumBaselineSamples {
-                        let count = Double(self.baselineSampleCount)
-                        self.baselineX = self.baselineSumX / count
-                        self.baselineY = self.baselineSumY / count
-                        self.baselineZ = self.baselineSumZ / count
-                        self.baselineCaptured = true
-                    }
-                }
-
                 let magnitude = sqrt(x * x + y * y + z * z)
+                self.updateBaselineIfNeeded(
+                    x: x, y: y, z: z, magnitude: magnitude,
+                    timestamp: deliveryTimestamp
+                )
+                self.updateMagneticSourceDetection(magnitude: magnitude)
+
                 var deltaMagnitude: Double?
                 if let bx = self.baselineX, let by = self.baselineY, let bz = self.baselineZ {
                     let dx = x - bx
@@ -182,17 +246,10 @@ final class MagnetometerService: ObservableObject {
                     calibrationQuality: calibrationQuality
                 )
 
-                self.rawSamples.append(sample)
-                if self.rawSamples.count > self.maximumStoredSamples {
-                    // Trim in chunks rather than shifting a 20k-element array every sample.
-                    self.rawSamples.removeFirst(max(1, self.maximumStoredSamples / 100))
-                }
-
                 if let previous = self.lastDeliveryTimestamp {
-                    let delta = deliveryTimestamp - previous
-                    if delta > 0 {
-                        let instantaneousRate = 1.0 / delta
-                        // Keep the per-sample estimate private; publish it at the UI update rate.
+                    let interval = deliveryTimestamp - previous
+                    if interval > 0 {
+                        let instantaneousRate = 1.0 / interval
                         self.smoothedDeliveryRateHz = self.smoothedDeliveryRateHz.map {
                             $0 * 0.8 + instantaneousRate * 0.2
                         } ?? instantaneousRate
@@ -200,30 +257,89 @@ final class MagnetometerService: ObservableObject {
                 }
                 self.lastDeliveryTimestamp = deliveryTimestamp
 
+                // The idle orb only needs the newest sample. Save the raw trace only
+                // while measuring so standby monitoring does not grow a hidden data log.
+                if self.isRunning {
+                    self.rawSamples.append(sample)
+                    if self.rawSamples.count > self.maximumStoredSamples {
+                        self.rawSamples.removeFirst(max(1, self.maximumStoredSamples / 100))
+                    }
+                }
+
                 let now = Date()
                 if now.timeIntervalSince(self.lastUIPublish) >= self.uiPublishInterval {
                     self.latestSample = sample
-                    self.observedDeliveryRateHz = self.smoothedDeliveryRateHz
-                    self.samples.append(sample)
-                    if self.samples.count > self.maximumChartSamples {
-                        // Trim in chunks to avoid repeated large array shifts during long sessions.
-                        self.samples.removeFirst(max(1, self.maximumChartSamples / 100))
+                    if self.isRunning {
+                        self.observedDeliveryRateHz = self.smoothedDeliveryRateHz
+                        self.samples.append(sample)
+                        if self.samples.count > self.maximumChartSamples {
+                            self.samples.removeFirst(max(1, self.maximumChartSamples / 100))
+                        }
                     }
                     self.lastUIPublish = now
                 }
             }
         }
-        isRunning = true
     }
 
-    func stop() {
-        motionManager.stopDeviceMotionUpdates()
-        isRunning = false
-        if let latestSample, samples.last?.id != latestSample.id {
-            samples.append(latestSample)
-            if samples.count > maximumChartSamples {
-                samples.removeFirst(samples.count - maximumChartSamples)
+    private func updateBaselineIfNeeded(
+        x: Double, y: Double, z: Double, magnitude: Double,
+        timestamp: TimeInterval
+    ) {
+        guard !baselineCaptured else { return }
+        if baselineStartTimestamp == nil {
+            baselineStartTimestamp = timestamp
+        }
+
+        baselineSumX += x
+        baselineSumY += y
+        baselineSumZ += z
+        baselineMagnitudeSum += magnitude
+        baselineMagnitudeSquareSum += magnitude * magnitude
+        baselineSampleCount += 1
+
+        let elapsed = timestamp - (baselineStartTimestamp ?? timestamp)
+        guard elapsed >= baselineCaptureDuration,
+              baselineSampleCount >= minimumBaselineSamples else { return }
+
+        let count = Double(baselineSampleCount)
+        baselineX = baselineSumX / count
+        baselineY = baselineSumY / count
+        baselineZ = baselineSumZ / count
+        let meanMagnitude = baselineMagnitudeSum / count
+        let variance = max(0, baselineMagnitudeSquareSum / count - meanMagnitude * meanMagnitude)
+        baselineMagnitude = meanMagnitude
+        baselineMagnitudeDeviation = sqrt(variance)
+        baselineCaptured = true
+    }
+
+    private func updateMagneticSourceDetection(magnitude: Double) {
+        guard baselineCaptured, let baselineMagnitude else {
+            magneticSourceDetected = false
+            return
+        }
+
+        // Magnitude is orientation-invariant; hysteresis and persistence reduce flicker.
+        // This detects a sustained local field change, not a specific object or wire.
+        let difference = abs(magnitude - baselineMagnitude)
+        let triggerThreshold = max(3.0, baselineMagnitudeDeviation * 4.0)
+        let releaseThreshold = triggerThreshold * 0.55
+
+        if difference >= triggerThreshold {
+            candidateAboveCount += 1
+            clearBelowCount = 0
+            if candidateAboveCount >= 3 {
+                magneticSourceDetected = true
             }
+        } else if difference < releaseThreshold {
+            clearBelowCount += 1
+            candidateAboveCount = 0
+            if clearBelowCount >= 10 {
+                magneticSourceDetected = false
+            }
+        } else {
+            candidateAboveCount = 0
+            clearBelowCount = 0
         }
     }
 
@@ -234,18 +350,8 @@ final class MagnetometerService: ObservableObject {
         lastDeliveryTimestamp = nil
         observedDeliveryRateHz = nil
         smoothedDeliveryRateHz = nil
-        baselineCaptured = false
-        calibrationQuality = "Unknown"
-        baselineStartTimestamp = nil
-        baselineStartWallClock = nil
-        baselineSampleCount = 0
-        baselineSumX = 0
-        baselineSumY = 0
-        baselineSumZ = 0
-        baselineX = nil
-        baselineY = nil
-        baselineZ = nil
         lastUIPublish = .distantPast
+        // Keep the reference baseline and idle detector stable during this session.
     }
 
     func exportCSV() -> URL? {
