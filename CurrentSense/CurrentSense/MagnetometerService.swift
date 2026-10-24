@@ -354,7 +354,7 @@ final class MagnetometerService: ObservableObject {
         if isRunning {
             recordedSamples.append(sample)
             if recordedSamples.count > maximumStoredSamples {
-                rawSamples.removeFirst(max(1, maximumStoredSamples / 100))
+                recordedSamples.removeFirst(max(1, maximumStoredSamples / 100))
             }
         }
 
@@ -406,7 +406,7 @@ final class MagnetometerService: ObservableObject {
     }
 
     func clearSamples() {
-        rawSamples.removeAll()
+        recordedSamples.removeAll()
         samples.removeAll()
         latestSample = nil
         lastDeliveryTimestamp = nil
