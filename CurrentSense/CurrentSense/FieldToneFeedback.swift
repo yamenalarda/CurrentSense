@@ -113,7 +113,7 @@ final class FieldToneFeedback: ObservableObject {
                     continue
                 }
                 for index in 0..<Int(frameCount) {
-                    samples[index] = Float(sin(phase.value) * 0.12)
+                    samples[index] = Float(sin(phase.value) * 0.28)
                     phase.value += twoPi * baseFrequency / sampleRate
                     if phase.value >= twoPi {
                         phase.value -= twoPi
@@ -127,7 +127,7 @@ final class FieldToneFeedback: ObservableObject {
         engine.attach(varispeed)
         engine.connect(sourceNode, to: varispeed, format: format)
         engine.connect(varispeed, to: engine.mainMixerNode, format: format)
-        engine.mainMixerNode.outputVolume = 0.18
+        engine.mainMixerNode.outputVolume = 0.24
         isConfigured = true
     }
 
