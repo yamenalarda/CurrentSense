@@ -312,9 +312,7 @@ struct ContentView: View {
             contentLayout(in: geometry)
         }
         .tint(colorScheme == .dark ? .white : .black)
-        .animation(.spring(response: 0.42, dampingFraction: 0.78), value: sensor.isRunning)
-        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: mode)
-        .animation(.spring(response: 0.45, dampingFraction: 0.76), value: fieldMagnitude)
+        // Avoid animating the full layout on every live sensor publication.
         .onAppear {
             if scenePhase == .active {
                 sensor.startMonitoring()
@@ -390,6 +388,7 @@ struct ContentView: View {
         }
         .padding(.top, 16)
         .padding(.horizontal, 16)
+        .zIndex(10)
     }
 
     private func measurementOrb(in geometry: GeometryProxy) -> some View {
@@ -531,28 +530,27 @@ struct ContentView: View {
                         ? (colorScheme == .dark ? 0.10 : 0.17)
                         : (colorScheme == .dark ? 0.035 : 0.08)))
                     .frame(width: proxy.size.width * 0.95)
-                    .blur(radius: 100)
+                    .blur(radius: 52)
                     .offset(x: -proxy.size.width * 0.25, y: -proxy.size.height * 0.08)
                 Circle()
                     .fill(Color.blue.opacity(colorScheme == .dark ? 0.025 : 0.12))
                     .frame(width: proxy.size.width * 0.7)
-                    .blur(radius: 90)
+                    .blur(radius: 42)
                     .offset(x: proxy.size.width * 0.35, y: proxy.size.height * 0.3)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .allowsHitTesting(false)
         }
         .ignoresSafeArea()
-        .animation(.easeInOut(duration: 0.6), value: fieldColor)
     }
 
     private var modePicker: some View {
         HStack(spacing: 5) {
             ForEach(MeasurementMode.allCases) { item in
                 Button {
-                    withAnimation(.spring(response: 0.34, dampingFraction: 0.72)) {
-                        mode = item
-                    }
+                    // Change the selected mode immediately; avoid a spring transition
+                    // competing with live Core Motion updates.
+                    mode = item
                 } label: {
                     HStack(spacing: 9) {
                         Image(systemName: item == .ac ? "waveform" : "arrow.right")
@@ -561,6 +559,7 @@ struct ContentView: View {
                             .font(.system(size: 16, weight: .semibold, design: .rounded))
                     }
                     .frame(maxWidth: .infinity)
+                    .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                     .padding(.vertical, 14)
                     .foregroundStyle(mode == item ? .white :
                         (colorScheme == .dark ? .white.opacity(0.55) : .black.opacity(0.58)))
@@ -576,9 +575,10 @@ struct ContentView: View {
                         }
                     }
                 }
-                .buttonStyle(OrbPressStyle())
+                .buttonStyle(.plain)
             }
         }
+        .contentShape(Capsule())
         .padding(5)
         .background(.ultraThinMaterial, in: Capsule())
         .overlay(Capsule().fill(colorScheme == .dark
@@ -745,8 +745,8 @@ private struct FieldOrb: View {
                         .clear
                     ], center: .center, startRadius: side * 0.12, endRadius: side * 0.62))
                     .frame(width: side * 1.12, height: side * 1.12)
-                    .blur(radius: side * 0.055)
-                    .scaleEffect(isMeasuring ? (drift ? 1.08 : 0.94) : 1)
+                    .blur(radius: side * 0.018)
+                    .scaleEffect(isMeasuring ? (drift ? 1.035 : 0.975) : 1)
 
                 // Spectral edge reflections create the glossy, holographic glass rim.
                 Circle()
@@ -767,14 +767,21 @@ private struct FieldOrb: View {
 
                 // Outer transparent glass body, with a soft rim.
                 Circle()
-                    .fill(.ultraThinMaterial)
+                    // Solid smoked-glass core: glossy and reflective, not see-through.
+                    .fill(LinearGradient(colors: colorScheme == .dark
+                        ? [Color(red: 0.13, green: 0.16, blue: 0.22),
+                           Color(red: 0.035, green: 0.045, blue: 0.065),
+                           Color(red: 0.095, green: 0.075, blue: 0.14)]
+                        : [Color(red: 0.88, green: 0.93, blue: 0.97),
+                           Color(red: 0.70, green: 0.78, blue: 0.86),
+                           Color(red: 0.83, green: 0.82, blue: 0.93)],
+                        startPoint: .topLeading, endPoint: .bottomTrailing))
                     .overlay {
                         Circle().fill(
                             LinearGradient(colors: [
-                                .white.opacity(0.12),
-                                tint.opacity(0.045),
-                                .white.opacity(0.015),
-                                tint.opacity(0.07)
+                                .white.opacity(colorScheme == .dark ? 0.25 : 0.48),
+                                tint.opacity(colorScheme == .dark ? 0.10 : 0.08),
+                                Color.black.opacity(colorScheme == .dark ? 0.28 : 0.035)
                             ], startPoint: .topLeading, endPoint: .bottomTrailing)
                         )
                     }
@@ -793,8 +800,8 @@ private struct FieldOrb: View {
                         Circle().stroke(.white.opacity(0.12), lineWidth: 7)
                             .blur(radius: 5)
                     }
-                    .shadow(color: tint.opacity(0.24 + intensity * 0.24),
-                            radius: 26 + CGFloat(intensity) * 24, y: 14)
+                    .shadow(color: tint.opacity(0.18 + intensity * 0.12),
+                            radius: 12 + CGFloat(intensity) * 8, y: 8)
 
                 // Soft refracted hues, like colored lights reflecting through polished glass.
                 Circle()
@@ -807,7 +814,7 @@ private struct FieldOrb: View {
                         Color.cyan.opacity(colorScheme == .dark ? 0.17 : 0.10)
                     ], center: .center))
                     .padding(side * 0.052)
-                    .blur(radius: side * 0.025)
+                    .blur(radius: side * 0.010)
                     .mask(Circle().padding(side * 0.035))
 
                 // Liquid, layered color inside the glass: simulation heatmap colors.
@@ -850,7 +857,7 @@ private struct FieldOrb: View {
                         .clear
                     ], startPoint: .topLeading, endPoint: .bottomTrailing))
                     .frame(width: side * 0.24, height: side * 0.42)
-                    .blur(radius: side * 0.035)
+                    .blur(radius: side * 0.012)
                     .rotationEffect(.degrees(24))
                     .offset(x: side * 0.29, y: -side * 0.015)
                     .blendMode(.screen)
@@ -954,7 +961,7 @@ private struct FieldOrb: View {
                     }
                 }
             }
-            .animation(.spring(response: 0.45, dampingFraction: 0.76), value: intensity)
+            // Avoid animating every tiny sensor fluctuation.
         }
     }
 }
