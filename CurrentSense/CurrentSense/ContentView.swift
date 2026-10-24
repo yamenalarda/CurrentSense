@@ -105,15 +105,12 @@ struct ContentView: View {
         guard sensor.isRunning,
               sensor.isOrientationStable,
               sensor.calibrationQuality != "Uncalibrated" else { return nil }
-        if mode == .dc {
-            // A 15-point rolling median reduces the effect of isolated spikes in DC estimates.
-            let window = sensor.samples.suffix(15)
-                .compactMap(\.filteredDeltaMagnitude)
-                .filter { $0.isFinite && $0 >= 0 }
-            guard window.count >= 7 else { return nil }
-            return MagneticAnomalyDetector.median(window)
-        }
-        return sensor.latestSample?.filteredDeltaMagnitude
+        // MagnetometerService already applies a 7-sample median and time-aware EMA
+        // to every sensor sample. A second 15-UI-sample median added ~2.4 s of lag
+        // in DC mode and is redundant; use the same filtered latest value in both modes.
+        guard let value = sensor.latestSample?.filteredDeltaMagnitude,
+              value.isFinite, value >= 0 else { return nil }
+        return value
     }
 
     private var acScanLevel: ACFieldActivityLevel {
@@ -629,7 +626,7 @@ struct ContentView: View {
                             : ((fieldMagnitude ?? 0) < sensor.minimumUsableFieldChangeMicrotesla
                                 ? String(format: "Below %.3f µT noise threshold",
                                          sensor.minimumUsableFieldChangeMicrotesla)
-                                : (mode == .dc ? "2.4 s rolling median" : "Filtered vs baseline")))),
+                                : "Filtered vs baseline"))),
                 tint: fieldColor
             )
             separator
