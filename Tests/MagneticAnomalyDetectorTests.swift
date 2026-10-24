@@ -118,6 +118,39 @@ struct MagneticAnomalyDetectorTests {
         expect(!stabilityGate.update(rotationRateRadiansPerSecond: .infinity),
                "invalid angular-rate data must fail closed")
 
+        // Robustly estimate the phone-fixed field bias from paired raw/calibrated vectors.
+        let trueBias = MagneticFieldVector(x: 4.0, y: -3.0, z: 2.0)
+        let calibratedWindow = (0..<15).map { i in
+            MagneticFieldVector(x: Double(i), y: Double(i % 4) * 2.0, z: 25.0 - Double(i))
+        }
+        var rawWindow = calibratedWindow.map { $0.adding(trueBias) }
+        rawWindow[3] = MagneticFieldVector(x: 400.0, y: -250.0, z: 100.0)
+        let estimatedBias = MagneticFieldBiasEstimator.estimate(
+            rawVectors: rawWindow,
+            calibratedVectors: calibratedWindow,
+            minimumPairs: 10
+        )
+        expect(estimatedBias != nil
+               && abs((estimatedBias?.x ?? 0) - trueBias.x) < 1e-9
+               && abs((estimatedBias?.y ?? 0) - trueBias.y) < 1e-9
+               && abs((estimatedBias?.z ?? 0) - trueBias.z) < 1e-9,
+               "median bias estimator must reject an isolated raw-field spike")
+
+        // A fixed world field plus phone-fixed bias should be invariant after a 90-degree turn.
+        let fixedWorld = MagneticFieldVector(x: 30.0, y: -10.0, z: 20.0)
+        let bias = MagneticFieldVector(x: 4.0, y: -3.0, z: 2.0)
+        let deviceFieldAfterTurn = MagneticFieldVector(x: -fixedWorld.y, y: fixedWorld.x, z: fixedWorld.z)
+            .adding(bias)
+        let correctedAfterTurn = deviceFieldAfterTurn.subtracting(bias).rotated(
+            m11: 0.0, m12: -1.0, m13: 0.0,
+            m21: 1.0, m22: 0.0, m23: 0.0,
+            m31: 0.0, m32: 0.0, m33: 1.0
+        )
+        expect(abs(correctedAfterTurn.x - fixedWorld.x) < 1e-9
+               && abs(correctedAfterTurn.y - fixedWorld.y) < 1e-9
+               && abs(correctedAfterTurn.z - fixedWorld.z) < 1e-9,
+               "bias correction plus attitude rotation must preserve a static field after a turn")
+
         print("PASS: MagneticAnomalyDetectorTests")
     }
 }

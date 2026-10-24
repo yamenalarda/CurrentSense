@@ -2,31 +2,76 @@ import Foundation
 import CoreMotion
 import Combine
 
-/// A calibrated magnetic sample and its attitude captured from the same CMDeviceMotion
-/// event. Keeping them together prevents rotation compensation from using a stale attitude.
+/// Device attitude and calibrated field from one Core Motion update.
+private struct AttitudeSnapshot: Sendable {
+    let timestamp: TimeInterval
+    let m11: Double; let m12: Double; let m13: Double
+    let m21: Double; let m22: Double; let m23: Double
+    let m31: Double; let m32: Double; let m33: Double
+    let calibratedField: MagneticFieldVector
+    let rotationRateRadiansPerSecond: Double
+    let calibrationQuality: String
+
+    func rotateToReference(_ vector: MagneticFieldVector) -> MagneticFieldVector {
+        vector.rotated(
+            m11: m11, m12: m12, m13: m13,
+            m21: m21, m22: m22, m23: m23,
+            m31: m31, m32: m32, m33: m33
+        )
+    }
+}
+
+/// Matches raw magnetometer timestamps to the nearest attitude/calibrated field sample.
+/// NSLock is used because Core Motion invokes handlers off the main actor.
+private final class MotionSnapshotBuffer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [AttitudeSnapshot] = []
+    private let capacity = 24
+
+    func append(_ snapshot: AttitudeSnapshot) {
+        lock.lock()
+        values.append(snapshot)
+        if values.count > capacity {
+            values.removeFirst(values.count - capacity)
+        }
+        lock.unlock()
+    }
+
+    func nearest(to timestamp: TimeInterval, maximumAge: TimeInterval) -> AttitudeSnapshot? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let nearest = values.min(by: {
+            abs($0.timestamp - timestamp) < abs($1.timestamp - timestamp)
+        }), abs(nearest.timestamp - timestamp) <= maximumAge else {
+            return nil
+        }
+        return nearest
+    }
+
+    func reset() {
+        lock.lock()
+        values.removeAll(keepingCapacity: true)
+        lock.unlock()
+    }
+}
+
+/// A raw magnetic sample paired with a timestamp-near calibrated field and attitude.
 private struct ProcessedMotionReading: Sendable {
     let timestamp: TimeInterval
     let wallClock: Date
-    let deviceX: Double
-    let deviceY: Double
-    let deviceZ: Double
-    let referenceX: Double
-    let referenceY: Double
-    let referenceZ: Double
-    let magnitude: Double
-    let rotationRateRadiansPerSecond: Double
-    let calibrationQuality: String
+    let rawField: MagneticFieldVector
+    let attitude: AttitudeSnapshot
 }
 
 struct MagneticSample: Identifiable {
     let id = UUID()
     /// Wall-clock time mapped from Core Motion's monotonic timestamp.
     let timestamp: Date
-    /// Calibrated magnetic-field components in device coordinates, in microtesla.
+    /// Raw magnetometer components in device coordinates, in microtesla.
     let x: Double
     let y: Double
     let z: Double
-    /// Magnitude of the calibrated field (Earth plus surrounding fields, minus device bias).
+    /// Raw magnitude (includes the device-fixed bias); anomaly delta is bias-corrected.
     let magnitude: Double
     /// Raw vector difference from the baseline, before filtering.
     let deltaMagnitude: Double?
@@ -68,6 +113,7 @@ final class MagnetometerService: ObservableObject {
     }
 
     private let motionManager = CMMotionManager()
+    private let motionSnapshotBuffer = MotionSnapshotBuffer()
     private let queue: OperationQueue = {
         let q = OperationQueue()
         q.name = "CurrentSense.MagnetometerQueue"
@@ -82,7 +128,7 @@ final class MagnetometerService: ObservableObject {
     // Keep display updates lightweight; Core Motion still feeds the filter at the requested rate.
     private let uiPublishInterval: TimeInterval = 0.16
     private let baselineCaptureDuration: TimeInterval = 2.0
-    private let minimumBaselineSamples = 10
+    private let minimumBaselineSamples = 24
     private let standbyUpdateInterval: TimeInterval = 1.0 / 10.0
     // Do not request exactly 100 Hz (the Nyquist boundary for 50 Hz mains).
     // The non-synchronous target can help reveal changes, but cannot guarantee
@@ -97,8 +143,8 @@ final class MagnetometerService: ObservableObject {
     private var motionGeneration: UInt64 = 0
     private var baselineStartTimestamp: TimeInterval?
     private var baselineStartWallClock: Date?
-    private var baselineSampleCount = 0
-    private var baselineVectors: [MagneticFieldVector] = []
+    private var baselineReadings: [ProcessedMotionReading] = []
+    private var estimatedDeviceBias: MagneticFieldVector?
     private var anomalyDetector = MagneticAnomalyDetector()
     private var fieldDeltaFilter = FieldDeltaFilter()
     private var orientationStabilityGate = OrientationStabilityGate()
@@ -125,6 +171,8 @@ final class MagnetometerService: ObservableObject {
         smoothedDeliveryRateHz = nil
         lastUIPublish = .distantPast
         motionManager.deviceMotionUpdateInterval = standbyUpdateInterval
+        motionManager.magnetometerUpdateInterval = standbyUpdateInterval
+        motionSnapshotBuffer.reset()
         startMotionUpdates()
     }
 
@@ -167,6 +215,7 @@ final class MagnetometerService: ObservableObject {
     private func setMotionUpdateInterval(_ interval: TimeInterval) {
         guard isMonitoring else { return }
         motionManager.deviceMotionUpdateInterval = interval
+        motionManager.magnetometerUpdateInterval = interval
         lastDeliveryTimestamp = nil
         smoothedDeliveryRateHz = nil
     }
@@ -176,6 +225,8 @@ final class MagnetometerService: ObservableObject {
         // Invalidate already-enqueued callback tasks before stopping Core Motion.
         motionGeneration &+= 1
         motionManager.stopDeviceMotionUpdates()
+        motionManager.stopMagnetometerUpdates()
+        motionSnapshotBuffer.reset()
         isRunning = false
         isMonitoring = false
         isOrientationStable = false
@@ -187,8 +238,8 @@ final class MagnetometerService: ObservableObject {
         baselineCaptured = false
         baselineStartTimestamp = nil
         baselineStartWallClock = nil
-        baselineSampleCount = 0
-        baselineVectors.removeAll(keepingCapacity: true)
+        baselineReadings.removeAll(keepingCapacity: true)
+        estimatedDeviceBias = nil
         anomalyDetector.reset()
         fieldDeltaFilter.reset()
         orientationStabilityGate.reset()
@@ -202,14 +253,12 @@ final class MagnetometerService: ObservableObject {
     private func startMotionUpdates() {
         motionGeneration &+= 1
         let generation = motionGeneration
+        let snapshotBuffer = motionSnapshotBuffer
 
-        // Use one synchronized Core Motion stream. Its calibrated field and attitude
-        // share the same timestamp, avoiding stale cross-stream rotations. Calibration
-        // removes device bias, a major cause of false changes when the phone is turned.
-        // A separate raw-magnetometer callback is intentionally not used for estimates:
-        // raw data contains hard-iron device bias and can swing as the handset rotates.
+        // Core Motion's calibrated stream supplies attitude + a bias-compensated
+        // field for estimating the phone-fixed bias during the initial baseline.
         motionManager.startDeviceMotionUpdates(using: .xArbitraryZVertical,
-                                               to: queue) { [weak self] motion, error in
+                                               to: queue) { [weak self, snapshotBuffer] motion, error in
             if let error {
                 Task { @MainActor in
                     guard let self, self.motionGeneration == generation else { return }
@@ -222,23 +271,11 @@ final class MagnetometerService: ObservableObject {
             guard let motion else { return }
 
             let field = motion.magneticField.field
-            let x = field.x
-            let y = field.y
-            let z = field.z
-            guard x.isFinite, y.isFinite, z.isFinite else { return }
-
+            let calibrated = MagneticFieldVector(x: field.x, y: field.y, z: field.z)
             let rotation = motion.attitude.rotationMatrix
-            let deviceVector = MagneticFieldVector(x: x, y: y, z: z)
-            let referenceVector = deviceVector.rotated(
-                m11: rotation.m11, m12: rotation.m12, m13: rotation.m13,
-                m21: rotation.m21, m22: rotation.m22, m23: rotation.m23,
-                m31: rotation.m31, m32: rotation.m32, m33: rotation.m33
-            )
-            guard referenceVector.isFinite else { return }
-
             let rate = motion.rotationRate
-            let rotationRateMagnitude = sqrt(rate.x * rate.x + rate.y * rate.y + rate.z * rate.z)
-            guard rotationRateMagnitude.isFinite else { return }
+            let rateMagnitude = sqrt(rate.x * rate.x + rate.y * rate.y + rate.z * rate.z)
+            guard calibrated.isFinite, rateMagnitude.isFinite else { return }
 
             let quality: String
             switch motion.magneticField.accuracy {
@@ -249,20 +286,42 @@ final class MagnetometerService: ObservableObject {
             @unknown default: quality = "Unknown"
             }
 
-            let reading = ProcessedMotionReading(
+            snapshotBuffer.append(AttitudeSnapshot(
                 timestamp: motion.timestamp,
-                wallClock: Date(),
-                deviceX: x, deviceY: y, deviceZ: z,
-                referenceX: referenceVector.x,
-                referenceY: referenceVector.y,
-                referenceZ: referenceVector.z,
-                magnitude: sqrt(x * x + y * y + z * z),
-                rotationRateRadiansPerSecond: rotationRateMagnitude,
+                m11: rotation.m11, m12: rotation.m12, m13: rotation.m13,
+                m21: rotation.m21, m22: rotation.m22, m23: rotation.m23,
+                m31: rotation.m31, m32: rotation.m32, m33: rotation.m33,
+                calibratedField: calibrated,
+                rotationRateRadiansPerSecond: rateMagnitude,
                 calibrationQuality: quality
-            )
+            ))
+        }
 
-            // Only one main-actor handoff per sensor sample now (instead of separate
-            // attitude + magnetometer tasks). Sensor fusion above is time-aligned.
+        // Raw data is retained for anomaly detection because Apple's calibrated
+        // CMDeviceMotion field can suppress some surrounding magnetic fields.
+        motionManager.startMagnetometerUpdates(to: queue) { [weak self, snapshotBuffer] data, error in
+            if let error {
+                Task { @MainActor in
+                    guard let self, self.motionGeneration == generation else { return }
+                    self.errorMessage = "Magnetometer update failed: \(error.localizedDescription)"
+                    self.isAvailable = false
+                    self.stopMonitoring()
+                }
+                return
+            }
+            guard let data else { return }
+            let magnetic = data.magneticField
+            let raw = MagneticFieldVector(x: magnetic.x, y: magnetic.y, z: magnetic.z)
+            guard raw.isFinite,
+                  let attitude = snapshotBuffer.nearest(to: data.timestamp, maximumAge: 0.06) else {
+                return
+            }
+            let reading = ProcessedMotionReading(
+                timestamp: data.timestamp,
+                wallClock: Date(),
+                rawField: raw,
+                attitude: attitude
+            )
             Task { @MainActor [weak self] in
                 guard let self,
                       self.isMonitoring,
@@ -273,8 +332,8 @@ final class MagnetometerService: ObservableObject {
     }
 
     private func processMotionSample(_ reading: ProcessedMotionReading) {
-        if calibrationQuality != reading.calibrationQuality {
-            calibrationQuality = reading.calibrationQuality
+        if calibrationQuality != reading.attitude.calibrationQuality {
+            calibrationQuality = reading.attitude.calibrationQuality
         }
 
         if let previous = lastDeliveryTimestamp {
@@ -290,24 +349,20 @@ final class MagnetometerService: ObservableObject {
 
         let wasStable = orientationStabilityGate.isStable
         let stable = orientationStabilityGate.update(
-            rotationRateRadiansPerSecond: reading.rotationRateRadiansPerSecond
+            rotationRateRadiansPerSecond: reading.attitude.rotationRateRadiansPerSecond
         )
         if isOrientationStable != stable {
             isOrientationStable = stable
         }
 
         guard stable else {
-            // Clear the display/filter window only on entry to motion, not for every
-            // moving sample. This prevents a turn from leaving a plausible-looking spike.
             if wasStable {
                 fieldDeltaFilter.reset()
                 samples.removeAll(keepingCapacity: true)
                 latestSample = nil
                 lastUIPublish = .distantPast
                 if !baselineCaptured {
-                    // Do not mix pre-turn and post-turn samples into a baseline window.
-                    baselineVectors.removeAll(keepingCapacity: true)
-                    baselineSampleCount = 0
+                    baselineReadings.removeAll(keepingCapacity: true)
                     baselineStartTimestamp = nil
                     baselineStartWallClock = nil
                 }
@@ -315,40 +370,55 @@ final class MagnetometerService: ObservableObject {
             return
         }
 
-        let referenceVector = MagneticFieldVector(
-            x: reading.referenceX,
-            y: reading.referenceY,
-            z: reading.referenceZ
-        )
+        // No trustworthy device-bias estimate is possible until Core Motion reports
+        // calibration. Suppress values rather than silently treating raw as calibrated.
+        guard reading.attitude.calibrationQuality != "Uncalibrated" else {
+            if baselineCaptured {
+                baselineCaptured = false
+                baselineNoiseSigmaMicrotesla = nil
+                estimatedDeviceBias = nil
+                baselineReadings.removeAll(keepingCapacity: true)
+                anomalyDetector.reset()
+                fieldDeltaFilter.reset()
+            }
+            return
+        }
+
         if baselineStartTimestamp == nil {
             baselineStartTimestamp = reading.timestamp
             baselineStartWallClock = reading.wallClock
         }
 
-        let sampleTimestamp: Date
-        if let startMotionTime = baselineStartTimestamp,
-           let startWallClock = baselineStartWallClock {
-            sampleTimestamp = startWallClock.addingTimeInterval(reading.timestamp - startMotionTime)
-        } else {
-            sampleTimestamp = reading.wallClock
+        if !baselineCaptured {
+            baselineReadings.append(reading)
+            if baselineReadings.count > 240 {
+                baselineReadings.removeFirst(baselineReadings.count - 240)
+            }
+            captureBaselineIfNeeded(at: reading.timestamp)
+            return
         }
 
-        updateBaselineIfNeeded(vector: referenceVector, timestamp: reading.timestamp)
-        updateMagneticSourceDetection(vector: referenceVector)
+        guard let estimatedDeviceBias else { return }
+        let biasCorrectedDeviceField = reading.rawField.subtracting(estimatedDeviceBias)
+        let referenceVector = reading.attitude.rotateToReference(biasCorrectedDeviceField)
+        guard referenceVector.isFinite else { return }
 
+        updateMagneticSourceDetection(vector: referenceVector)
         let deltaMagnitude = anomalyDetector.baselineVector.map {
             referenceVector.distance(to: $0)
         }
         let filteredDeltaMagnitude = fieldDeltaFilter.update(deltaMagnitude)
         let sample = MagneticSample(
-            timestamp: sampleTimestamp,
-            x: reading.deviceX,
-            y: reading.deviceY,
-            z: reading.deviceZ,
-            magnitude: reading.magnitude,
+            timestamp: sampleDate(for: reading),
+            x: reading.rawField.x,
+            y: reading.rawField.y,
+            z: reading.rawField.z,
+            magnitude: sqrt(reading.rawField.x * reading.rawField.x
+                          + reading.rawField.y * reading.rawField.y
+                          + reading.rawField.z * reading.rawField.z),
             deltaMagnitude: deltaMagnitude,
             filteredDeltaMagnitude: filteredDeltaMagnitude,
-            calibrationQuality: reading.calibrationQuality
+            calibrationQuality: reading.attitude.calibrationQuality
         )
 
         if isRunning {
@@ -371,29 +441,41 @@ final class MagnetometerService: ObservableObject {
         }
     }
 
-    private func updateBaselineIfNeeded(
-        vector: MagneticFieldVector,
-        timestamp: TimeInterval
-    ) {
-        guard !baselineCaptured else { return }
-        if baselineStartTimestamp == nil {
-            baselineStartTimestamp = timestamp
+    private func sampleDate(for reading: ProcessedMotionReading) -> Date {
+        guard let startMotionTime = baselineStartTimestamp,
+              let startWallClock = baselineStartWallClock else {
+            return reading.wallClock
         }
+        return startWallClock.addingTimeInterval(reading.timestamp - startMotionTime)
+    }
 
-        baselineVectors.append(vector)
-        baselineSampleCount += 1
+    private func captureBaselineIfNeeded(at timestamp: TimeInterval) {
+        guard !baselineCaptured,
+              let start = baselineStartTimestamp,
+              timestamp - start >= baselineCaptureDuration,
+              baselineReadings.count >= minimumBaselineSamples else { return }
 
-        let elapsed = timestamp - (baselineStartTimestamp ?? timestamp)
-        guard elapsed >= baselineCaptureDuration,
-              baselineSampleCount >= minimumBaselineSamples else { return }
+        let raw = baselineReadings.map(\.rawField)
+        let calibrated = baselineReadings.map { $0.attitude.calibratedField }
+        guard let bias = MagneticFieldBiasEstimator.estimate(
+            rawVectors: raw,
+            calibratedVectors: calibrated,
+            minimumPairs: minimumBaselineSamples
+        ) else { return }
 
-        anomalyDetector.setBaseline(from: baselineVectors)
+        let correctedReferenceVectors = baselineReadings.map { sample in
+            sample.attitude.rotateToReference(sample.rawField.subtracting(bias))
+        }.filter(\.isFinite)
+        guard correctedReferenceVectors.count >= minimumBaselineSamples else { return }
+
+        estimatedDeviceBias = bias
+        anomalyDetector.setBaseline(from: correctedReferenceVectors)
         baselineCaptured = anomalyDetector.hasBaseline
         baselineNoiseSigmaMicrotesla = anomalyDetector.hasBaseline
             ? anomalyDetector.noiseSigmaEstimate
             : nil
         fieldDeltaFilter.reset()
-        baselineVectors.removeAll(keepingCapacity: true)
+        baselineReadings.removeAll(keepingCapacity: true)
     }
 
     private func updateMagneticSourceDetection(vector: MagneticFieldVector) {
@@ -418,7 +500,7 @@ final class MagnetometerService: ObservableObject {
 
     func exportCSV() -> URL? {
         guard !recordedSamples.isEmpty else { return nil }
-        let header = "timestamp_iso8601,calibrated_device_x_uT,calibrated_device_y_uT,calibrated_device_z_uT,calibrated_field_magnitude_uT,reference_vector_delta_uT,filtered_reference_vector_delta_uT,device_motion_calibration_quality"
+        let header = "timestamp_iso8601,raw_device_x_uT,raw_device_y_uT,raw_device_z_uT,raw_field_magnitude_uT,bias_corrected_reference_delta_uT,filtered_bias_corrected_delta_uT,device_motion_calibration_quality"
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let body = recordedSamples.map { $0.csvRow(using: formatter) }.joined(separator: "\n")
@@ -436,5 +518,6 @@ final class MagnetometerService: ObservableObject {
 
     deinit {
         motionManager.stopDeviceMotionUpdates()
+        motionManager.stopMagnetometerUpdates()
     }
 }

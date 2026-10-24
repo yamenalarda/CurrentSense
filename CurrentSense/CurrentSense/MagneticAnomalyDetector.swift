@@ -1,7 +1,7 @@
 import Foundation
 
 /// A 3D vector of magnetic flux density in microtesla.
-struct MagneticFieldVector {
+struct MagneticFieldVector: Sendable {
     let x: Double
     let y: Double
     let z: Double
@@ -13,6 +13,14 @@ struct MagneticFieldVector {
         let dy = y - other.y
         let dz = z - other.z
         return sqrt(dx * dx + dy * dy + dz * dz)
+    }
+
+    func subtracting(_ other: MagneticFieldVector) -> MagneticFieldVector {
+        MagneticFieldVector(x: x - other.x, y: y - other.y, z: z - other.z)
+    }
+
+    func adding(_ other: MagneticFieldVector) -> MagneticFieldVector {
+        MagneticFieldVector(x: x + other.x, y: y + other.y, z: z + other.z)
     }
 
     /// Transform a device-coordinate vector to Core Motion's reference coordinates.
@@ -28,6 +36,46 @@ struct MagneticFieldVector {
             y: x * m12 + y * m22 + z * m32,
             z: x * m13 + y * m23 + z * m33
         )
+    }
+}
+
+
+/// Estimates the phone-fixed hard-iron bias from paired raw and calibrated field vectors.
+/// Call only while capturing a baseline away from the target; the median rejects isolated spikes.
+struct MagneticFieldBiasEstimator {
+    static func estimate(
+        rawVectors: [MagneticFieldVector],
+        calibratedVectors: [MagneticFieldVector],
+        minimumPairs: Int = 10
+    ) -> MagneticFieldVector? {
+        let count = min(rawVectors.count, calibratedVectors.count)
+        guard count >= max(1, minimumPairs) else { return nil }
+
+        var dx: [Double] = []
+        var dy: [Double] = []
+        var dz: [Double] = []
+        dx.reserveCapacity(count)
+        dy.reserveCapacity(count)
+        dz.reserveCapacity(count)
+
+        for index in 0..<count {
+            let raw = rawVectors[index]
+            let calibrated = calibratedVectors[index]
+            guard raw.isFinite, calibrated.isFinite else { continue }
+            let delta = raw.subtracting(calibrated)
+            guard delta.isFinite else { continue }
+            dx.append(delta.x)
+            dy.append(delta.y)
+            dz.append(delta.z)
+        }
+
+        guard dx.count >= max(1, minimumPairs) else { return nil }
+        let bias = MagneticFieldVector(
+            x: MagneticAnomalyDetector.median(dx),
+            y: MagneticAnomalyDetector.median(dy),
+            z: MagneticAnomalyDetector.median(dz)
+        )
+        return bias.isFinite ? bias : nil
     }
 }
 

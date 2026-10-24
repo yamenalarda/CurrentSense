@@ -102,7 +102,9 @@ struct ContentView: View {
     // Only display a field-change value during an active measurement.
     // In standby, the detector is communicated solely through the small orb's appearance.
     private var fieldMagnitude: Double? {
-        guard sensor.isRunning, sensor.isOrientationStable else { return nil }
+        guard sensor.isRunning,
+              sensor.isOrientationStable,
+              sensor.calibrationQuality != "Uncalibrated" else { return nil }
         if mode == .dc {
             // A 15-point rolling median reduces the effect of isolated spikes in DC estimates.
             let window = sensor.samples.suffix(15)
