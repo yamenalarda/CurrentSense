@@ -27,8 +27,9 @@ jobs:
             -o "$RUNNER_TEMP/MagneticAnomalyDetectorTests"
           "$RUNNER_TEMP/MagneticAnomalyDetectorTests"
 
-      - name: Select Xcode
+      - name: Verify Xcode toolchain and project
         run: |
+          xcode-select -p
           xcodebuild -version
           xcodebuild -list -project CurrentSense/CurrentSense.xcodeproj
 
