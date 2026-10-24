@@ -43,6 +43,14 @@ jobs:
             -o "$RUNNER_TEMP/FieldToneMappingTests"
           "$RUNNER_TEMP/FieldToneMappingTests"
 
+      - name: Run qualitative AC field scan regression tests
+        run: |
+          swiftc \
+            CurrentSense/CurrentSense/ACFieldScanClassifier.swift \
+            Tests/ACFieldScanClassifierTests.swift \
+            -o "$RUNNER_TEMP/ACFieldScanClassifierTests"
+          "$RUNNER_TEMP/ACFieldScanClassifierTests"
+
       - name: Verify Xcode toolchain and project
         run: |
           xcode-select -p
