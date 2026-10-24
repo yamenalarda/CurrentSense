@@ -100,6 +100,10 @@ final class MagnetometerService: ObservableObject {
         }
         guard isMonitoring else { return }
 
+        // The phone may have been opened while already near the cable.
+        // Capture a fresh reference only after the user deliberately starts a reading.
+        // This prevents a nearby field from being treated as the zero baseline.
+        resetBaseline()
         rawSamples.removeAll(keepingCapacity: true)
         samples.removeAll(keepingCapacity: true)
         lastUIPublish = .distantPast
