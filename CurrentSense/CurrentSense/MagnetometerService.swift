@@ -296,7 +296,12 @@ final class MagnetometerService: ObservableObject {
 
     private func updateMagneticSourceDetection(vector: MagneticFieldVector) {
         // This signals a sustained field change only, not cable contact or current.
-        magneticSourceDetected = anomalyDetector.update(vector: vector)
+        // Publish only state transitions; writing the same @Published value at 100 Hz
+        // would cause unnecessary SwiftUI invalidations.
+        let detected = anomalyDetector.update(vector: vector)
+        if magneticSourceDetected != detected {
+            magneticSourceDetected = detected
+        }
     }
 
     func clearSamples() {
