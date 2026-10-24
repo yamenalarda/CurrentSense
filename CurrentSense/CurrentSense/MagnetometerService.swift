@@ -6,11 +6,11 @@ struct MagneticSample: Identifiable {
     let id = UUID()
     /// Wall-clock time mapped from Core Motion's monotonic timestamp.
     let timestamp: Date
-    /// Calibrated magnetic-field components in microtesla.
+    /// Raw magnetometer-field components in device coordinates, in microtesla.
     let x: Double
     let y: Double
     let z: Double
-    /// Total field magnitude, including the Earth's field.
+    /// Magnitude of the raw magnetometer field, including Earth's field and sensor bias.
     let magnitude: Double
     /// Raw vector difference from the baseline, before filtering.
     let deltaMagnitude: Double?
@@ -81,6 +81,22 @@ final class MagnetometerService: ObservableObject {
     private var baselineVectors: [MagneticFieldVector] = []
     private var anomalyDetector = MagneticAnomalyDetector()
     private var fieldDeltaFilter = FieldDeltaFilter()
+    private var latestAttitude: AttitudeSnapshot?
+
+    private struct AttitudeSnapshot {
+        let timestamp: TimeInterval
+        let m11: Double; let m12: Double; let m13: Double
+        let m21: Double; let m22: Double; let m23: Double
+        let m31: Double; let m32: Double; let m33: Double
+
+        func rotate(_ vector: MagneticFieldVector) -> MagneticFieldVector {
+            vector.rotated(
+                m11: m11, m12: m12, m13: m13,
+                m21: m21, m22: m22, m23: m23,
+                m31: m31, m32: m32, m33: m33
+            )
+        }
+    }
 
     init() {
         isAvailable = motionManager.isDeviceMotionAvailable && motionManager.isMagnetometerAvailable
@@ -104,6 +120,7 @@ final class MagnetometerService: ObservableObject {
         smoothedDeliveryRateHz = nil
         lastUIPublish = .distantPast
         motionManager.deviceMotionUpdateInterval = standbyUpdateInterval
+        motionManager.magnetometerUpdateInterval = standbyUpdateInterval
         startMotionUpdates()
     }
 
@@ -146,6 +163,7 @@ final class MagnetometerService: ObservableObject {
     private func setMotionUpdateInterval(_ interval: TimeInterval) {
         guard isMonitoring else { return }
         motionManager.deviceMotionUpdateInterval = interval
+        motionManager.magnetometerUpdateInterval = interval
         lastDeliveryTimestamp = nil
         smoothedDeliveryRateHz = nil
     }
@@ -155,6 +173,7 @@ final class MagnetometerService: ObservableObject {
         // Invalidate already-enqueued callback tasks before stopping Core Motion.
         motionGeneration &+= 1
         motionManager.stopDeviceMotionUpdates()
+        motionManager.stopMagnetometerUpdates()
         isRunning = false
         isMonitoring = false
         magneticSourceDetected = false
@@ -177,15 +196,16 @@ final class MagnetometerService: ObservableObject {
     private func startMotionUpdates() {
         motionGeneration &+= 1
         let generation = motionGeneration
-        // Avoid magnetometer-corrected yaw during magnetic anomaly detection:
-        // a local magnetic source could otherwise influence the attitude used to
-        // rotate that same field vector. This frame can drift slowly over long sessions.
+
+        // The calibrated CMDeviceMotion magnetic field can suppress device bias and,
+        // in some cases, nearby magnetic fields. Use device motion for attitude only,
+        // and obtain the measured field from the raw CMMagnetometerData stream.
         motionManager.startDeviceMotionUpdates(using: .xArbitraryZVertical,
                                                to: queue) { [weak self] motion, error in
             if let error {
                 Task { @MainActor in
                     guard let self, self.motionGeneration == generation else { return }
-                    self.errorMessage = "Motion update failed: \(error.localizedDescription)"
+                    self.errorMessage = "Motion update failed: \\(error.localizedDescription)"
                     self.isAvailable = false
                     self.stopMonitoring()
                 }
@@ -193,41 +213,69 @@ final class MagnetometerService: ObservableObject {
             }
             guard let motion else { return }
 
-            let field = motion.magneticField.field
-            let x = field.x
-            let y = field.y
-            let z = field.z
-            guard x.isFinite, y.isFinite, z.isFinite else { return }
-
-            // Magnetic field is reported in device coordinates. Rotate it into the
-            // persistent Core Motion reference frame so a phone rotation is less likely
-            // to look like a magnetic-source change.
             let rotation = motion.attitude.rotationMatrix
-            let referenceVector = MagneticFieldVector(x: x, y: y, z: z).rotated(
+            let attitude = AttitudeSnapshot(
+                timestamp: motion.timestamp,
                 m11: rotation.m11, m12: rotation.m12, m13: rotation.m13,
                 m21: rotation.m21, m22: rotation.m22, m23: rotation.m23,
                 m31: rotation.m31, m32: rotation.m32, m33: rotation.m33
             )
-            guard referenceVector.isFinite else { return }
-
-            let deliveryTimestamp = motion.timestamp
-            let deliveryWallClock = Date()
-            let calibrationQuality: String
+            let quality: String
             switch motion.magneticField.accuracy {
-            case .high: calibrationQuality = "High"
-            case .medium: calibrationQuality = "Medium"
-            case .low: calibrationQuality = "Low"
-            case .uncalibrated: calibrationQuality = "Uncalibrated"
-            @unknown default: calibrationQuality = "Unknown"
+            case .high: quality = "High"
+            case .medium: quality = "Medium"
+            case .low: quality = "Low"
+            case .uncalibrated: quality = "Uncalibrated"
+            @unknown default: quality = "Unknown"
             }
 
             Task { @MainActor in
                 guard let self,
                       self.isMonitoring,
                       self.motionGeneration == generation else { return }
-                if self.calibrationQuality != calibrationQuality {
-                    self.calibrationQuality = calibrationQuality
+                self.latestAttitude = attitude
+                if self.calibrationQuality != quality {
+                    self.calibrationQuality = quality
                 }
+            }
+        }
+
+        motionManager.startMagnetometerUpdates(to: queue) { [weak self] data, error in
+            if let error {
+                Task { @MainActor in
+                    guard let self, self.motionGeneration == generation else { return }
+                    self.errorMessage = "Magnetometer update failed: \\(error.localizedDescription)"
+                    self.isAvailable = false
+                    self.stopMonitoring()
+                }
+                return
+            }
+            guard let data else { return }
+
+            // CMMagnetometerData is the raw magnetic field. It retains surrounding
+            // field changes that the calibrated CMDeviceMotion field can suppress.
+            let field = data.magneticField
+            let x = field.x
+            let y = field.y
+            let z = field.z
+            guard x.isFinite, y.isFinite, z.isFinite else { return }
+
+            let deliveryTimestamp = data.timestamp
+            let deliveryWallClock = Date()
+
+            Task { @MainActor in
+                guard let self,
+                      self.isMonitoring,
+                      self.motionGeneration == generation else { return }
+                guard let attitude = self.latestAttitude,
+                      abs(deliveryTimestamp - attitude.timestamp) <= 0.25 else {
+                    // Do not turn a missing/stale attitude into a false magnetic change.
+                    return
+                }
+
+                let rawVector = MagneticFieldVector(x: x, y: y, z: z)
+                let referenceVector = attitude.rotate(rawVector)
+                guard referenceVector.isFinite else { return }
 
                 if self.baselineStartTimestamp == nil {
                     self.baselineStartTimestamp = deliveryTimestamp
@@ -261,7 +309,7 @@ final class MagnetometerService: ObservableObject {
                     magnitude: magnitude,
                     deltaMagnitude: deltaMagnitude,
                     filteredDeltaMagnitude: filteredDeltaMagnitude,
-                    calibrationQuality: calibrationQuality
+                    calibrationQuality: self.calibrationQuality
                 )
 
                 if let previous = self.lastDeliveryTimestamp {
@@ -275,8 +323,8 @@ final class MagnetometerService: ObservableObject {
                 }
                 self.lastDeliveryTimestamp = deliveryTimestamp
 
-                // The idle orb only needs the newest sample. Save the raw trace only
-                // while measuring so standby monitoring does not grow a hidden data log.
+                // The UI publishes at a lower rate, while the raw trace retains every
+                // accepted magnetometer sample so AC aliasing/noise can be inspected later.
                 if self.isRunning {
                     self.rawSamples.append(sample)
                     if self.rawSamples.count > self.maximumStoredSamples {
@@ -348,7 +396,7 @@ final class MagnetometerService: ObservableObject {
 
     func exportCSV() -> URL? {
         guard !rawSamples.isEmpty else { return nil }
-        let header = "timestamp_iso8601,device_x_uT,device_y_uT,device_z_uT,total_magnitude_uT,raw_reference_vector_delta_uT,filtered_reference_vector_delta_uT,calibration_quality"
+        let header = "timestamp_iso8601,raw_device_x_uT,raw_device_y_uT,raw_device_z_uT,raw_field_magnitude_uT,raw_reference_vector_delta_uT,filtered_reference_vector_delta_uT,device_motion_calibration_quality"
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let body = rawSamples.map { $0.csvRow(using: formatter) }.joined(separator: "\n")
@@ -366,5 +414,6 @@ final class MagnetometerService: ObservableObject {
 
     deinit {
         motionManager.stopDeviceMotionUpdates()
+        motionManager.stopMagnetometerUpdates()
     }
 }
