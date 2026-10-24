@@ -5,6 +5,7 @@ on:
   push:
     paths:
       - "CurrentSense/**"
+      - "Tests/**"
       - ".github/workflows/build-ios.yml"
 
 permissions:
@@ -17,6 +18,14 @@ jobs:
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
+
+      - name: Run magnetic anomaly detector regression tests
+        run: |
+          swiftc \
+            CurrentSense/CurrentSense/MagneticAnomalyDetector.swift \
+            Tests/MagneticAnomalyDetectorTests.swift \
+            -o "$RUNNER_TEMP/MagneticAnomalyDetectorTests"
+          "$RUNNER_TEMP/MagneticAnomalyDetectorTests"
 
       - name: Select Xcode
         run: |
