@@ -73,6 +73,20 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var sensor = MagnetometerService()
     @State private var mode: MeasurementMode = .ac
+    @State private var showCalculationSetup = false
+
+    @AppStorage("CurrentSense.calculation.conductor")
+    private var conductorRawValue = ConductorConfiguration.singleConductor.rawValue
+    @AppStorage("CurrentSense.calculation.reference")
+    private var referenceRawValue = ReferenceSelection.knownDistance.rawValue
+    @AppStorage("CurrentSense.calculation.distanceCm")
+    private var referenceDistanceCm = "2.0"
+    @AppStorage("CurrentSense.calculation.currentA")
+    private var referenceCurrentA = "1.0"
+    @AppStorage("CurrentSense.calibration.acSensitivity")
+    private var acSensitivityMicroteslaPerAmp = 0.0
+    @AppStorage("CurrentSense.calibration.dcSensitivity")
+    private var dcSensitivityMicroteslaPerAmp = 0.0
 
     private var primaryTextColor: Color {
         colorScheme == .dark ? .white.opacity(0.94) : .black.opacity(0.86)
@@ -92,15 +106,77 @@ struct ContentView: View {
     }
     private var fieldColor: Color { FieldPalette.color(for: fieldMagnitude ?? 0) }
 
+    private var conductorConfiguration: ConductorConfiguration {
+        ConductorConfiguration(rawValue: conductorRawValue) ?? .singleConductor
+    }
+
+    private var estimateReference: EstimationReference {
+        switch conductorConfiguration {
+        case .completeCable:
+            let sensitivity = mode == .ac
+                ? acSensitivityMicroteslaPerAmp
+                : dcSensitivityMicroteslaPerAmp
+            return sensitivity.isFinite && sensitivity > 0
+                ? .empiricalMicroteslaPerAmp(sensitivity)
+                : .missing
+        case .singleConductor:
+            guard let reference = ReferenceSelection(rawValue: referenceRawValue) else {
+                return .invalid
+            }
+            switch reference {
+            case .knownDistance:
+                guard let distance = NumericInput.parse(referenceDistanceCm) else { return .invalid }
+                return .knownDistanceCentimeters(distance)
+            case .knownCurrent:
+                guard let current = NumericInput.parse(referenceCurrentA) else { return .invalid }
+                return .knownCurrentAmperes(current)
+            }
+        }
+    }
+
+    private var estimate: CurrentEstimate {
+        CurrentEstimateCalculator.evaluate(
+            fieldChangeMicrotesla: fieldMagnitude,
+            isAC: mode == .ac,
+            conductor: conductorConfiguration,
+            reference: estimateReference,
+            sensorCalibrationQuality: sensor.calibrationQuality
+        )
+    }
+
+    private var currentMetricTitle: String {
+        estimate.currentDetail.contains("Entered reference") ? "REFERENCE CURRENT" : "CURRENT"
+    }
+
+    private var distanceMetricTitle: String {
+        estimate.distanceDetail.contains("Entered reference") ? "REFERENCE DISTANCE" : "DISTANCE"
+    }
+
     var body: some View {
         GeometryReader { geometry in
             ZStack {
                 FieldPalette.background(for: colorScheme).ignoresSafeArea()
                 ambientGlow
                 VStack(spacing: 0) {
-                    modePicker
-                        .padding(.top, 16)
-                        .padding(.horizontal, 34)
+                    HStack(spacing: 10) {
+                        modePicker
+                        Button {
+                            showCalculationSetup = true
+                        } label: {
+                            Image(systemName: "slider.horizontal.3")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(primaryTextColor)
+                                .frame(width: 42, height: 42)
+                                .background(.ultraThinMaterial, in: Circle())
+                                .overlay(Circle().stroke(
+                                    colorScheme == .dark ? .white.opacity(0.18) : .black.opacity(0.10),
+                                    lineWidth: 1
+                                ))
+                        }
+                        .accessibilityLabel("Calculation settings")
+                    }
+                    .padding(.top, 16)
+                    .padding(.horizontal, 16)
 
                     Spacer(minLength: 12)
 
@@ -172,6 +248,14 @@ struct ContentView: View {
                             }
                             .padding(.top, 2)
                         }
+                        if sensor.isRunning, let caution = estimate.caution {
+                            Text(caution)
+                                .font(.system(size: 10, weight: .regular, design: .rounded))
+                                .foregroundStyle(colorScheme == .dark ? .white.opacity(0.62) : .black.opacity(0.62))
+                                .multilineTextAlignment(.center)
+                                .lineLimit(3)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                     .padding(.horizontal, 28)
                     .padding(.top, 20)
@@ -204,6 +288,23 @@ struct ContentView: View {
             }
         }
         .onDisappear { sensor.stopMonitoring() }
+        .sheet(isPresented: $showCalculationSetup) {
+            CalculationSettingsView(
+                isAC: mode == .ac,
+                sensor: sensor,
+                onCalibrate: { referenceAmps, fieldMicrotesla, isAC in
+                    let sensitivity = fieldMicrotesla / referenceAmps
+                    guard sensitivity.isFinite, sensitivity > 0 else { return }
+                    if isAC {
+                        acSensitivityMicroteslaPerAmp = sensitivity
+                    } else {
+                        dcSensitivityMicroteslaPerAmp = sensitivity
+                    }
+                }
+            )
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
     }
 
     private var ambientGlow: some View {
@@ -270,21 +371,31 @@ struct ContentView: View {
 
     private var measurementBar: some View {
         HStack(spacing: 0) {
-            metricColumn(title: "CURRENT", value: "—", unit: "A",
-                         detail: "Not calculated",
-                         tint: secondaryTextColor)
+            metricColumn(
+                title: currentMetricTitle,
+                value: estimate.currentAmperes.map { String(format: "%.2f", $0) } ?? "—",
+                unit: "A",
+                detail: estimate.currentDetail,
+                tint: estimate.currentAmperes == nil ? secondaryTextColor : fieldColor
+            )
             separator
-            metricColumn(title: "FIELD CHANGE",
-                         value: fieldMagnitude.map { String(format: "%.1f", $0) } ?? "—",
-                         unit: "µT",
-                         detail: !sensor.isRunning
-                            ? "Start measuring"
-                            : (sensor.baselineCaptured ? "Relative to baseline" : "Capturing baseline"),
-                         tint: fieldColor)
+            metricColumn(
+                title: "FIELD CHANGE",
+                value: fieldMagnitude.map { String(format: "%.1f", $0) } ?? "—",
+                unit: "µT",
+                detail: !sensor.isRunning
+                    ? "Start measuring"
+                    : (sensor.baselineCaptured ? "Relative to baseline" : "Capturing baseline"),
+                tint: fieldColor
+            )
             separator
-            metricColumn(title: "DISTANCE", value: "—", unit: "cm",
-                         detail: "Not inferable",
-                         tint: secondaryTextColor)
+            metricColumn(
+                title: distanceMetricTitle,
+                value: estimate.distanceCentimeters.map { String(format: "%.1f", $0) } ?? "—",
+                unit: "cm",
+                detail: estimate.distanceDetail,
+                tint: estimate.distanceCentimeters == nil ? secondaryTextColor : fieldColor
+            )
         }
         .padding(.vertical, 16)
         .padding(.horizontal, 8)
@@ -582,3 +693,185 @@ private struct OrbPressStyle: ButtonStyle {
     }
 }
 
+
+
+private enum NumericInput {
+    static func parse(_ text: String) -> Double? {
+        var value = text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: " ", with: "")
+            .replacingOccurrences(of: "\u{00A0}", with: "")
+        guard !value.isEmpty else { return nil }
+
+        if value.contains(",") && value.contains(".") {
+            let comma = value.lastIndex(of: ",")!
+            let dot = value.lastIndex(of: ".")!
+            if comma > dot {
+                value = value.replacingOccurrences(of: ".", with: "")
+                    .replacingOccurrences(of: ",", with: ".")
+            } else {
+                value = value.replacingOccurrences(of: ",", with: "")
+            }
+        } else if value.contains(",") {
+            value = value.replacingOccurrences(of: ",", with: ".")
+        }
+
+        guard let number = Double(value), number.isFinite else { return nil }
+        return number
+    }
+}
+
+private struct CalculationSettingsView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
+    @ObservedObject var sensor: MagnetometerService
+
+    let isAC: Bool
+    let onCalibrate: (Double, Double, Bool) -> Void
+
+    @AppStorage("CurrentSense.calculation.conductor")
+    private var conductorRawValue = ConductorConfiguration.singleConductor.rawValue
+    @AppStorage("CurrentSense.calculation.reference")
+    private var referenceRawValue = ReferenceSelection.knownDistance.rawValue
+    @AppStorage("CurrentSense.calculation.distanceCm")
+    private var referenceDistanceCm = "2.0"
+    @AppStorage("CurrentSense.calculation.currentA")
+    private var referenceCurrentA = "1.0"
+    @AppStorage("CurrentSense.calibration.acSensitivity")
+    private var acSensitivityMicroteslaPerAmp = 0.0
+    @AppStorage("CurrentSense.calibration.dcSensitivity")
+    private var dcSensitivityMicroteslaPerAmp = 0.0
+
+    @State private var calibrationReferenceCurrentA = "1.0"
+    @State private var calibrationFeedback: String?
+
+    private var conductor: ConductorConfiguration {
+        ConductorConfiguration(rawValue: conductorRawValue) ?? .singleConductor
+    }
+
+    private var currentSensitivity: Double {
+        isAC ? acSensitivityMicroteslaPerAmp : dcSensitivityMicroteslaPerAmp
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Conductor setup") {
+                    Picker("Wiring", selection: $conductorRawValue) {
+                        ForEach(ConductorConfiguration.allCases) { item in
+                            Text(item.title).tag(item.rawValue)
+                        }
+                    }
+                    .pickerStyle(.menu)
+
+                    if conductor == .singleConductor {
+                        Picker("Known reference", selection: $referenceRawValue) {
+                            ForEach(ReferenceSelection.allCases) { item in
+                                Text(item.title).tag(item.rawValue)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+
+                        if referenceRawValue == ReferenceSelection.knownDistance.rawValue {
+                            TextField("Sensor-to-wire distance (cm)", text: $referenceDistanceCm)
+                                .keyboardType(.decimalPad)
+                            Text("Enter the estimated distance from the iPhone's magnetic sensor to the conductor center, including insulation and sensor depth.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            TextField("Known reference current (A)", text: $referenceCurrentA)
+                                .keyboardType(.decimalPad)
+                            Text("This current is shown as a reference input; only distance is calculated from the field.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Text("The physical model applies only to a long, isolated, straight DC conductor. It is not valid for a complete phase/neutral cable or tightly bundled wires.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("The phase and neutral inside a complete cable can cancel each other's magnetic fields. Use an empirical reference calibration at the exact phone position.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+
+                        TextField("Known reference current (A)", text: $calibrationReferenceCurrentA)
+                            .keyboardType(.decimalPad)
+
+                        HStack {
+                            Text("Current-mode calibration")
+                            Spacer()
+                            Text(isAC ? "AC" : "DC")
+                                .foregroundStyle(.secondary)
+                        }
+                        HStack {
+                            Text("Saved sensitivity")
+                            Spacer()
+                            Text(currentSensitivity > 0
+                                 ? String(format: "%.3f µT/A", currentSensitivity)
+                                 : "Not calibrated")
+                                .foregroundStyle(currentSensitivity > 0 ? .primary : .secondary)
+                        }
+
+                        Button("Calibrate from current reading") {
+                            calibrate()
+                        }
+                        .disabled(
+                            !sensor.isRunning ||
+                            !sensor.baselineCaptured ||
+                            (sensor.latestSample?.deltaMagnitude ?? 0) <
+                                CurrentEstimateCalculator.minimumUsableFieldChangeMicrotesla
+                        )
+
+                        if let calibrationFeedback {
+                            Text(calibrationFeedback)
+                                .font(.footnote)
+                                .foregroundStyle(calibrationFeedback.hasPrefix("Saved")
+                                    ? .green : .orange)
+                        }
+
+                        Text("Use a known current from a suitable reference meter. Keep the same cable, load type, frequency, phone position, case, and orientation when measuring later. AC calibration is not a guarantee of true RMS accuracy.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Section("Measurement limits") {
+                    Text("One magnetic-field reading cannot independently determine both current and distance. The app calculates one from a supplied reference, or uses a cable-specific sensitivity calibrated against a known current.")
+                    Text("Readings below 0.5 µT are treated as too weak. Low or uncalibrated sensor status lowers confidence. These estimates are not a substitute for a clamp meter.")
+                }
+            }
+            .navigationTitle("Calculation Setup")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .tint(colorScheme == .dark ? .white : .black)
+    }
+
+    private func calibrate() {
+        guard let referenceAmps = NumericInput.parse(calibrationReferenceCurrentA),
+              referenceAmps > 0,
+              referenceAmps <= CurrentEstimateCalculator.maximumReferenceCurrentAmperes else {
+            calibrationFeedback = "Enter a valid positive reference current."
+            return
+        }
+        guard sensor.isRunning,
+              sensor.baselineCaptured,
+              let field = sensor.latestSample?.deltaMagnitude,
+              field.isFinite,
+              field >= CurrentEstimateCalculator.minimumUsableFieldChangeMicrotesla else {
+            calibrationFeedback = "Start measurement and wait for a stable field reading."
+            return
+        }
+        let sensitivity = field / referenceAmps
+        guard sensitivity.isFinite, sensitivity > 0 else {
+            calibrationFeedback = "The current field reading cannot calibrate this setup."
+            return
+        }
+        onCalibrate(referenceAmps, field, isAC)
+        calibrationFeedback = "Saved sensitivity: \(String(format: "%.3f", sensitivity)) µT/A for \(isAC ? "AC" : "DC")."
+    }
+}
