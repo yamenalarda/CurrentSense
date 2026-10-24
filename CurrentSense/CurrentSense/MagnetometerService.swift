@@ -2,6 +2,21 @@ import Foundation
 import CoreMotion
 import Combine
 
+private struct AttitudeSnapshot {
+    let timestamp: TimeInterval
+    let m11: Double; let m12: Double; let m13: Double
+    let m21: Double; let m22: Double; let m23: Double
+    let m31: Double; let m32: Double; let m33: Double
+
+    func rotate(_ vector: MagneticFieldVector) -> MagneticFieldVector {
+        vector.rotated(
+            m11: m11, m12: m12, m13: m13,
+            m21: m21, m22: m22, m23: m23,
+            m31: m31, m32: m32, m33: m33
+        )
+    }
+}
+
 struct MagneticSample: Identifiable {
     let id = UUID()
     /// Wall-clock time mapped from Core Motion's monotonic timestamp.
@@ -83,21 +98,6 @@ final class MagnetometerService: ObservableObject {
     private var fieldDeltaFilter = FieldDeltaFilter()
     private var latestAttitude: AttitudeSnapshot?
 
-    private struct AttitudeSnapshot {
-        let timestamp: TimeInterval
-        let m11: Double; let m12: Double; let m13: Double
-        let m21: Double; let m22: Double; let m23: Double
-        let m31: Double; let m32: Double; let m33: Double
-
-        func rotate(_ vector: MagneticFieldVector) -> MagneticFieldVector {
-            vector.rotated(
-                m11: m11, m12: m12, m13: m13,
-                m21: m21, m22: m22, m23: m23,
-                m31: m31, m32: m32, m33: m33
-            )
-        }
-    }
-
     init() {
         isAvailable = motionManager.isDeviceMotionAvailable && motionManager.isMagnetometerAvailable
     }
@@ -174,6 +174,7 @@ final class MagnetometerService: ObservableObject {
         motionGeneration &+= 1
         motionManager.stopDeviceMotionUpdates()
         motionManager.stopMagnetometerUpdates()
+        latestAttitude = nil
         isRunning = false
         isMonitoring = false
         magneticSourceDetected = false
@@ -205,7 +206,7 @@ final class MagnetometerService: ObservableObject {
             if let error {
                 Task { @MainActor in
                     guard let self, self.motionGeneration == generation else { return }
-                    self.errorMessage = "Motion update failed: \\(error.localizedDescription)"
+                    self.errorMessage = "Motion update failed: \(error.localizedDescription)"
                     self.isAvailable = false
                     self.stopMonitoring()
                 }
@@ -244,7 +245,7 @@ final class MagnetometerService: ObservableObject {
             if let error {
                 Task { @MainActor in
                     guard let self, self.motionGeneration == generation else { return }
-                    self.errorMessage = "Magnetometer update failed: \\(error.localizedDescription)"
+                    self.errorMessage = "Magnetometer update failed: \(error.localizedDescription)"
                     self.isAvailable = false
                     self.stopMonitoring()
                 }
