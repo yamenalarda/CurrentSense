@@ -213,29 +213,39 @@ struct FieldDeltaFilter {
 }
 
 
-/// Rejects samples taken while the device is rotating quickly. Rotation compensation
-/// reduces orientation errors, but transient Core Motion calibration during fast turns
-/// can still create false field changes. Stability returns only after several calm samples.
+/// Rejects samples while the device is rotating quickly or translating abruptly.
+/// Attitude compensation handles rotation mathematically, while this gate suppresses
+/// transient motion/calibration artifacts. Stability returns only after several calm samples.
 struct OrientationStabilityGate {
     private(set) var isStable = false
     private var consecutiveCalmSamples = 0
 
     private let instabilityRateRadiansPerSecond = 0.35
     private let recoveryRateRadiansPerSecond = 0.20
+    // CMDeviceMotion.userAcceleration is expressed in g after gravity is removed.
+    // Thresholds conservatively reject pronounced hand translation/shocks, not tiny tremor.
+    private let instabilityAccelerationMagnitudeG = 0.12
+    private let recoveryAccelerationMagnitudeG = 0.06
     private let calmSamplesRequired = 4
 
     @discardableResult
-    mutating func update(rotationRateRadiansPerSecond rate: Double) -> Bool {
-        guard rate.isFinite, rate >= 0 else {
+    mutating func update(
+        rotationRateRadiansPerSecond rate: Double,
+        userAccelerationMagnitudeG acceleration: Double = 0.0
+    ) -> Bool {
+        guard rate.isFinite, rate >= 0,
+              acceleration.isFinite, acceleration >= 0 else {
             consecutiveCalmSamples = 0
             isStable = false
             return false
         }
 
-        if rate >= instabilityRateRadiansPerSecond {
+        if rate >= instabilityRateRadiansPerSecond
+            || acceleration >= instabilityAccelerationMagnitudeG {
             consecutiveCalmSamples = 0
             isStable = false
-        } else if rate <= recoveryRateRadiansPerSecond {
+        } else if rate <= recoveryRateRadiansPerSecond
+                    && acceleration <= recoveryAccelerationMagnitudeG {
             consecutiveCalmSamples += 1
             if consecutiveCalmSamples >= calmSamplesRequired {
                 isStable = true

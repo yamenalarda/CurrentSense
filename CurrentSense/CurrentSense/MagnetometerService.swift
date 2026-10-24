@@ -10,6 +10,7 @@ private struct AttitudeSnapshot: Sendable {
     let m31: Double; let m32: Double; let m33: Double
     let calibratedField: MagneticFieldVector
     let rotationRateRadiansPerSecond: Double
+    let userAccelerationMagnitudeG: Double
     let calibrationQuality: String
 
     func rotateToReference(_ vector: MagneticFieldVector) -> MagneticFieldVector {
@@ -275,7 +276,15 @@ final class MagnetometerService: ObservableObject {
             let rotation = motion.attitude.rotationMatrix
             let rate = motion.rotationRate
             let rateMagnitude = sqrt(rate.x * rate.x + rate.y * rate.y + rate.z * rate.z)
-            guard calibrated.isFinite, rateMagnitude.isFinite else { return }
+            let acceleration = motion.userAcceleration
+            let accelerationMagnitudeG = sqrt(
+                acceleration.x * acceleration.x
+                + acceleration.y * acceleration.y
+                + acceleration.z * acceleration.z
+            )
+            guard calibrated.isFinite,
+                  rateMagnitude.isFinite,
+                  accelerationMagnitudeG.isFinite else { return }
 
             let quality: String
             switch motion.magneticField.accuracy {
@@ -293,6 +302,7 @@ final class MagnetometerService: ObservableObject {
                 m31: rotation.m31, m32: rotation.m32, m33: rotation.m33,
                 calibratedField: calibrated,
                 rotationRateRadiansPerSecond: rateMagnitude,
+                userAccelerationMagnitudeG: accelerationMagnitudeG,
                 calibrationQuality: quality
             ))
         }
@@ -349,7 +359,8 @@ final class MagnetometerService: ObservableObject {
 
         let wasStable = orientationStabilityGate.isStable
         let stable = orientationStabilityGate.update(
-            rotationRateRadiansPerSecond: reading.attitude.rotationRateRadiansPerSecond
+            rotationRateRadiansPerSecond: reading.attitude.rotationRateRadiansPerSecond,
+            userAccelerationMagnitudeG: reading.attitude.userAccelerationMagnitudeG
         )
         if isOrientationStable != stable {
             isOrientationStable = stable

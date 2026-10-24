@@ -118,6 +118,34 @@ struct MagneticAnomalyDetectorTests {
         expect(!stabilityGate.update(rotationRateRadiansPerSecond: .infinity),
                "invalid angular-rate data must fail closed")
 
+        // Accelerometer input must suppress readings during a strong translational movement,
+        // even when the phone is not rotating.
+        for _ in 0..<4 {
+            _ = stabilityGate.update(
+                rotationRateRadiansPerSecond: 0.10,
+                userAccelerationMagnitudeG: 0.02
+            )
+        }
+        expect(stabilityGate.isStable, "low linear acceleration should permit stable readings")
+        expect(!stabilityGate.update(
+            rotationRateRadiansPerSecond: 0.10,
+            userAccelerationMagnitudeG: 0.20
+        ), "strong linear motion must immediately invalidate readings")
+        for _ in 0..<3 {
+            expect(!stabilityGate.update(
+                rotationRateRadiansPerSecond: 0.10,
+                userAccelerationMagnitudeG: 0.02
+            ), "motion recovery must wait for four calm samples")
+        }
+        expect(stabilityGate.update(
+            rotationRateRadiansPerSecond: 0.10,
+            userAccelerationMagnitudeG: 0.02
+        ), "stability should recover after four low-motion samples")
+        expect(!stabilityGate.update(
+            rotationRateRadiansPerSecond: 0.10,
+            userAccelerationMagnitudeG: .nan
+        ), "invalid acceleration data must fail closed")
+
         // Robustly estimate the phone-fixed field bias from paired raw/calibrated vectors.
         let trueBias = MagneticFieldVector(x: 4.0, y: -3.0, z: 2.0)
         let calibratedWindow = (0..<15).map { i in
