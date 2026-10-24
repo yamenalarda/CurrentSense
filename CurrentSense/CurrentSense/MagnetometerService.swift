@@ -124,7 +124,9 @@ final class MagnetometerService: ObservableObject {
 
             Task { @MainActor in
                 guard let self, self.isRunning else { return }
-                self.calibrationQuality = calibrationQuality
+                if self.calibrationQuality != calibrationQuality {
+                    self.calibrationQuality = calibrationQuality
+                }
 
                 if self.baselineStartTimestamp == nil {
                     self.baselineStartTimestamp = deliveryTimestamp
