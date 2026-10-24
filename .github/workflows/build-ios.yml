@@ -35,6 +35,14 @@ jobs:
             -o "$RUNNER_TEMP/CurrentEstimateCalculatorTests"
           "$RUNNER_TEMP/CurrentEstimateCalculatorTests"
 
+      - name: Run variable-tone mapping regression tests
+        run: |
+          swiftc \
+            CurrentSense/CurrentSense/FieldToneMapping.swift \
+            Tests/FieldToneMappingTests.swift \
+            -o "$RUNNER_TEMP/FieldToneMappingTests"
+          "$RUNNER_TEMP/FieldToneMappingTests"
+
       - name: Verify Xcode toolchain and project
         run: |
           xcode-select -p
