@@ -29,42 +29,35 @@ private enum FieldPalette {
         )
     }
 
+    // Store RGB components directly so live redraws don't repeatedly bridge
+    // Color through UIColor just to interpolate the same fixed heat-map stops.
+    private static let stops: [(position: Double, red: Double, green: Double, blue: Double)] = [
+        (0.00, 0.02, 0.16, 0.95),
+        (0.20, 0.0, 0.72, 1.0),
+        (0.40, 0.05, 0.92, 0.55),
+        (0.60, 1.0, 0.90, 0.05),
+        (0.80, 1.0, 0.38, 0.04),
+        (1.00, 1.0, 0.04, 0.12)
+    ]
+
     // Simulation-style heat map: low field = blue, high field = red.
     static func color(for magnitude: Double) -> Color {
         let t = min(max(magnitude / 50.0, 0), 1)
-        let stops: [(Double, Color)] = [
-            (0.00, Color(red: 0.02, green: 0.16, blue: 0.95)),
-            (0.20, Color(red: 0.0, green: 0.72, blue: 1.0)),
-            (0.40, Color(red: 0.05, green: 0.92, blue: 0.55)),
-            (0.60, Color(red: 1.0, green: 0.90, blue: 0.05)),
-            (0.80, Color(red: 1.0, green: 0.38, blue: 0.04)),
-            (1.00, Color(red: 1.0, green: 0.04, blue: 0.12))
-        ]
         for index in 0..<(stops.count - 1) {
-            let (a, ca) = stops[index]
-            let (b, cb) = stops[index + 1]
-            if t >= a && t <= b {
-                let u = (t - a) / (b - a)
+            let a = stops[index]
+            let b = stops[index + 1]
+            if t >= a.position && t <= b.position {
+                let u = (t - a.position) / (b.position - a.position)
                 return Color(
-                    red: ca.components.red + (cb.components.red - ca.components.red) * u,
-                    green: ca.components.green + (cb.components.green - ca.components.green) * u,
-                    blue: ca.components.blue + (cb.components.blue - ca.components.blue) * u
+                    red: a.red + (b.red - a.red) * u,
+                    green: a.green + (b.green - a.green) * u,
+                    blue: a.blue + (b.blue - a.blue) * u
                 )
             }
         }
-        return stops.last!.1
-    }
-}
 
-private extension Color {
-    var components: (red: Double, green: Double, blue: Double) {
-        let ui = UIColor(self)
-        var r: CGFloat = 0
-        var g: CGFloat = 0
-        var b: CGFloat = 0
-        var a: CGFloat = 0
-        ui.getRed(&r, green: &g, blue: &b, alpha: &a)
-        return (Double(r), Double(g), Double(b))
+        let last = stops[stops.count - 1]
+        return Color(red: last.red, green: last.green, blue: last.blue)
     }
 }
 
