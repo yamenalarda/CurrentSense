@@ -33,7 +33,7 @@ struct MagneticAnomalyDetectorTests {
                "y baseline median should resist an outlier")
 
         // A 90-degree device rotation should preserve the same reference-frame field.
-        let rotatedField = MagneticFieldVector(x: 50.0, y: 0.0, z: 0.0).rotated(
+        let rotatedField = MagneticFieldVector(x: -50.0, y: 0.0, z: 0.0).rotated(
             m11: 0, m12: -1, m13: 0,
             m21: 1, m22: 0, m23: 0,
             m31: 0, m32: 0, m33: 1
