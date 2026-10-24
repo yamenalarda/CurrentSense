@@ -131,9 +131,9 @@ final class MagnetometerService: ObservableObject {
     private let baselineCaptureDuration: TimeInterval = 2.0
     private let minimumBaselineSamples = 24
     private let standbyUpdateInterval: TimeInterval = 1.0 / 10.0
-    // Do not request exactly 100 Hz (the Nyquist boundary for 50 Hz mains).
-    // The non-synchronous target can help reveal changes, but cannot guarantee
-    // waveform reconstruction or true-RMS AC measurement.
+    // A 40 Hz target balances responsiveness and processing cost.
+    // Core Motion's actual delivery rate can vary; 40 Hz cannot reconstruct
+    // a 50/60 Hz mains waveform or produce a true-RMS AC measurement.
     private let measurementUpdateInterval: TimeInterval = 1.0 / 40.0
 
     private var recordedSamples: [MagneticSample] = []
@@ -230,9 +230,16 @@ final class MagnetometerService: ObservableObject {
         motionSnapshotBuffer.reset()
         isRunning = false
         isMonitoring = false
-        isOrientationStable = false
-        orientationStabilityGate.reset()
-        magneticSourceDetected = false
+
+        // Do not leave diagnostics or the idle orb showing old data after
+        // interruption, app backgrounding, or a sensor failure.
+        resetBaseline()
+        samples.removeAll(keepingCapacity: true)
+        recordedSamples.removeAll(keepingCapacity: true)
+        lastDeliveryTimestamp = nil
+        smoothedDeliveryRateHz = nil
+        observedDeliveryRateHz = nil
+        lastUIPublish = .distantPast
     }
 
     private func resetBaseline() {
@@ -346,6 +353,8 @@ final class MagnetometerService: ObservableObject {
                         return
                     }
                     self.processMotionSample(pendingReading)
+                    // Yield so SwiftUI and user input can run when samples arrive continuously.
+                    await Task.yield()
                 }
             }
         }

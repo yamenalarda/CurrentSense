@@ -1211,7 +1211,7 @@ private struct CalculationSettingsView: View {
                     Text("Zero change means the sensor sees little difference from its captured baseline; it does not prove that current is zero. Start the measurement away from the cable, hold still until the baseline is ready, then move the phone close to the insulated cable.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
-                    Text("The main signal now uses raw CMMagnetometerData, while Core Motion accuracy is displayed only as auxiliary metadata. A charger cable can still produce little external field because its paired conductors partly cancel. The requested update interval is not the actual sample rate; use the rate above. The 80 Hz request may reduce synchronization with 50 Hz mains in some devices, but cannot reconstruct a true AC RMS waveform.")
+                    Text("The main signal uses raw CMMagnetometerData, while Core Motion accuracy is auxiliary metadata. A charger cable can produce little external field because its paired conductors partly cancel. The app requests 40 Hz, but actual delivery can differ; use the rate above. This rate cannot reconstruct a true 50/60 Hz AC RMS waveform.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -1251,7 +1251,7 @@ private struct CalculationSettingsView: View {
             return
         }
         guard let field = stableCalibrationField else {
-            calibrationFeedback = "Hold the phone still to collect a stable 1.5-second window."
+            calibrationFeedback = "Hold the phone still until several stable readings are available."
             return
         }
         guard field.isFinite, field >= sensor.minimumUsableFieldChangeMicrotesla else {
