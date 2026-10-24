@@ -1218,7 +1218,7 @@ private struct CalculationSettingsView: View {
             return
         }
         let stableWindow = sensor.samples.suffix(15)
-            .compactMap(\\.filteredDeltaMagnitude)
+            .compactMap(\.filteredDeltaMagnitude)
             .filter { $0.isFinite && $0 >= 0 }
         guard stableWindow.count >= 7 else {
             calibrationFeedback = "Hold the phone still to collect a stable 1.5-second window."
