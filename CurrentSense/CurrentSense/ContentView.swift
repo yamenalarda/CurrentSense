@@ -112,9 +112,11 @@ struct ContentView: View {
                         .multilineTextAlignment(.center)
                         .contentTransition(.opacity)
                         Text(
-                            mode == .ac
-                                ? "AC current is not calculated; this shows field change only."
-                                : "DC current is not calculated from field change alone."
+                            !sensor.isRunning
+                                ? "Start away from the cable; keep the phone orientation fixed."
+                                : (mode == .ac
+                                    ? "Keep the phone still. AC current is not calculated."
+                                    : "Keep the phone still. DC current is not calculated.")
                         )
                         .font(.system(size: 12, weight: .regular, design: .rounded))
                         .foregroundStyle(.white.opacity(0.62))
@@ -132,6 +134,9 @@ struct ContentView: View {
                                     .font(.system(size: 10, weight: .bold, design: .rounded))
                                     .tracking(1.2)
                                     .foregroundStyle(sensor.baselineCaptured ? fieldColor : .yellow)
+                                Text("· CAL \(sensor.calibrationQuality.uppercased())")
+                                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                                    .foregroundStyle(sensor.calibrationQuality == "High" ? .white.opacity(0.72) : .yellow.opacity(0.9))
                                 if let rate = sensor.observedDeliveryRateHz {
                                     Text(String(format: "· %.0f Hz", rate))
                                         .font(.system(size: 10, weight: .medium, design: .rounded))
