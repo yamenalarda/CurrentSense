@@ -1,5 +1,4 @@
 import SwiftUI
-import Charts
 import UIKit
 
 private enum MeasurementMode: String, CaseIterable, Identifiable {
