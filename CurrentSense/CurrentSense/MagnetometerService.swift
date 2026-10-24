@@ -91,8 +91,8 @@ final class MagnetometerService: ObservableObject {
         startMotionUpdates()
     }
 
-    /// Starts a measurement session without throwing away the standby baseline.
-    /// If the phone is already near a magnetic source, the live delta is preserved.
+    /// Starts a measurement session with a fresh baseline captured after this tap.
+    /// The user should hold the phone away from the cable until baselineCaptured is true.
     func start() {
         guard !isRunning else { return }
         if !isMonitoring {
