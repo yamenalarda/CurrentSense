@@ -110,8 +110,16 @@ struct ContentView: View {
     private func formattedCurrent(_ value: Double) -> String {
         guard value.isFinite, value >= 0 else { return "—" }
         if value > 0 && value < 0.0001 { return "<0.0001" }
+        if value < 0.01 { return String(format: "%.4f", value) }
         if value < 0.1 { return String(format: "%.3f", value) }
         return String(format: "%.2f", value)
+    }
+
+    private func formattedDistance(_ value: Double) -> String {
+        guard value.isFinite, value > 0 else { return "—" }
+        if value < 0.001 { return "<0.001" }
+        if value < 0.1 { return String(format: "%.3f", value) }
+        return String(format: "%.1f", value)
     }
 
     private var conductorConfiguration: ConductorConfiguration {
@@ -454,7 +462,7 @@ struct ContentView: View {
             separator
             metricColumn(
                 title: distanceMetricTitle,
-                value: estimate.distanceCentimeters.map { String(format: "%.1f", $0) } ?? "—",
+                value: estimate.distanceCentimeters.map { formattedDistance($0) } ?? "—",
                 unit: "cm",
                 detail: estimate.distanceDetail,
                 tint: estimate.distanceCentimeters == nil ? secondaryTextColor : fieldColor
