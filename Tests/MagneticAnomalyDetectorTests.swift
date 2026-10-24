@@ -151,6 +151,12 @@ struct MagneticAnomalyDetectorTests {
                && abs(correctedAfterTurn.z - fixedWorld.z) < 1e-9,
                "bias correction plus attitude rotation must preserve a static field after a turn")
 
+        expect(MagneticFieldBiasEstimator.estimate(
+            rawVectors: Array(rawWindow.prefix(9)),
+            calibratedVectors: Array(calibratedWindow.prefix(9)),
+            minimumPairs: 10
+        ) == nil, "bias calibration must reject insufficient paired samples")
+
         print("PASS: MagneticAnomalyDetectorTests")
     }
 }

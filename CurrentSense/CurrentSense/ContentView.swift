@@ -86,7 +86,7 @@ struct ContentView: View {
     private var referenceCurrentA = "1.0"
     @AppStorage("CurrentSense.calibration.acSensitivity")
     private var acSensitivityMicroteslaPerAmp = 0.0
-    @AppStorage("CurrentSense.calibration.dcSensitivity.v3")
+    @AppStorage("CurrentSense.calibration.dcSensitivity.v4")
     private var dcSensitivityMicroteslaPerAmp = 0.0
 
     private var primaryTextColor: Color {
@@ -425,13 +425,15 @@ struct ContentView: View {
             Text(
                 !sensor.isRunning
                     ? (mode == .ac ? "Tap the circle to start field scan" : "Tap the circle to begin")
-                    : (!sensor.isOrientationStable
-                        ? "Hold the phone still — stabilizing the reading"
-                        : (!sensor.baselineCaptured
-                            ? "Capturing baseline — hold still away from cable"
-                            : (mode == .ac
-                                ? "Scan slowly along the insulated cable"
-                                : "Baseline ready — move phone near the conductor")))
+                    : (sensor.calibrationQuality == "Uncalibrated"
+                        ? "Magnetometer calibration required"
+                        : (!sensor.isOrientationStable
+                            ? "Hold the phone still — stabilizing the reading"
+                            : (!sensor.baselineCaptured
+                                ? "Capturing baseline — hold still away from cable"
+                                : (mode == .ac
+                                    ? "Scan slowly along the insulated cable"
+                                    : "Baseline ready — move phone near the conductor"))))
             )
             .font(.system(size: 16, weight: .medium, design: .rounded))
             .foregroundStyle(primaryTextColor)
@@ -443,13 +445,15 @@ struct ContentView: View {
                     ? (mode == .ac
                         ? "AC shows relative magnetic activity, not voltage or current numbers."
                         : "Start away from the conductor and hold still while the baseline is captured.")
-                    : (!sensor.isOrientationStable
-                        ? "Fast rotation is temporarily ignored to prevent false field spikes."
-                        : (!sensor.baselineCaptured
-                            ? "Keep the phone still until the reference is ready."
-                            : (mode == .ac
-                                ? "Keep the phone still at each point; movement itself can change the field."
-                                : "DC estimates use a rolling median. Keep position and orientation fixed.")))
+                    : (sensor.calibrationQuality == "Uncalibrated"
+                        ? "Move the phone slowly in a figure-eight away from the cable, then retry."
+                        : (!sensor.isOrientationStable
+                            ? "Fast rotation is temporarily ignored to prevent false field spikes."
+                            : (!sensor.baselineCaptured
+                                ? "Keep the phone still until the reference is ready."
+                                : (mode == .ac
+                                    ? "Keep the phone still at each point; movement itself can change the field."
+                                    : "DC estimates use a rolling median. Keep position and orientation fixed."))))
             )
             .font(.system(size: 12, weight: .regular, design: .rounded))
             .foregroundStyle(secondaryTextColor)
@@ -467,16 +471,19 @@ struct ContentView: View {
                     Circle()
                         .fill(sensor.baselineCaptured ? fieldColor : .yellow)
                         .frame(width: 6, height: 6)
-                    Text(!sensor.isOrientationStable
-                         ? "HOLD PHONE STILL"
-                         : (sensor.baselineCaptured
-                            ? (mode == .ac
-                                ? acScanLevel.title.uppercased()
-                                : (fieldMagnitude == nil ? "STABILIZING DC SIGNAL" : "STABLE DC WINDOW"))
-                            : "CAPTURING BASELINE"))
+                    Text(sensor.calibrationQuality == "Uncalibrated"
+                         ? "CALIBRATION REQUIRED"
+                         : (!sensor.isOrientationStable
+                            ? "HOLD PHONE STILL"
+                            : (sensor.baselineCaptured
+                                ? (mode == .ac
+                                    ? acScanLevel.title.uppercased()
+                                    : (fieldMagnitude == nil ? "STABILIZING DC SIGNAL" : "STABLE DC WINDOW"))
+                                : "CAPTURING BASELINE")))
                         .font(.system(size: 10, weight: .bold, design: .rounded))
                         .tracking(1.0)
-                        .foregroundStyle(sensor.isOrientationStable && sensor.baselineCaptured
+                        .foregroundStyle(sensor.calibrationQuality != "Uncalibrated"
+                                         && sensor.isOrientationStable && sensor.baselineCaptured
                                          ? (mode == .ac ? acScanColor : fieldColor)
                                          : .yellow)
                     Text("· CAL \\(sensor.calibrationQuality.uppercased())")
@@ -1030,7 +1037,7 @@ private struct CalculationSettingsView: View {
     private var referenceCurrentA = "1.0"
     @AppStorage("CurrentSense.calibration.acSensitivity")
     private var acSensitivityMicroteslaPerAmp = 0.0
-    @AppStorage("CurrentSense.calibration.dcSensitivity.v3")
+    @AppStorage("CurrentSense.calibration.dcSensitivity.v4")
     private var dcSensitivityMicroteslaPerAmp = 0.0
 
     @State private var calibrationReferenceCurrentA = "1.0"

@@ -373,14 +373,20 @@ final class MagnetometerService: ObservableObject {
         // No trustworthy device-bias estimate is possible until Core Motion reports
         // calibration. Suppress values rather than silently treating raw as calibrated.
         guard reading.attitude.calibrationQuality != "Uncalibrated" else {
-            if baselineCaptured {
-                baselineCaptured = false
-                baselineNoiseSigmaMicrotesla = nil
-                estimatedDeviceBias = nil
-                baselineReadings.removeAll(keepingCapacity: true)
-                anomalyDetector.reset()
-                fieldDeltaFilter.reset()
-            }
+            isOrientationStable = false
+            orientationStabilityGate.reset()
+            magneticSourceDetected = false
+            baselineCaptured = false
+            baselineNoiseSigmaMicrotesla = nil
+            estimatedDeviceBias = nil
+            baselineReadings.removeAll(keepingCapacity: true)
+            baselineStartTimestamp = nil
+            baselineStartWallClock = nil
+            anomalyDetector.reset()
+            fieldDeltaFilter.reset()
+            samples.removeAll(keepingCapacity: true)
+            latestSample = nil
+            lastUIPublish = .distantPast
             return
         }
 
