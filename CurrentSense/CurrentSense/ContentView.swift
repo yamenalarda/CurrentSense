@@ -970,10 +970,34 @@ private struct CalculationSettingsView: View {
                             .monospacedDigit()
                     }
                     HStack {
-                        Text("Change from baseline")
+                        Text("Raw change")
+                        Spacer()
+                        Text(sensor.latestSample?.deltaMagnitude.map {
+                            String(format: "%.3f µT", $0)
+                        } ?? "—")
+                            .monospacedDigit()
+                    }
+                    HStack {
+                        Text("Filtered change")
                         Spacer()
                         Text(sensor.latestSample?.filteredDeltaMagnitude.map {
                             String(format: "%.3f µT", $0)
+                        } ?? "—")
+                            .monospacedDigit()
+                    }
+                    HStack {
+                        Text("Baseline noise (MAD)")
+                        Spacer()
+                        Text(sensor.baselineNoiseSigmaMicrotesla.map {
+                            String(format: "%.3f µT", $0)
+                        } ?? "—")
+                            .monospacedDigit()
+                    }
+                    HStack {
+                        Text("Actual sample rate")
+                        Spacer()
+                        Text(sensor.observedDeliveryRateHz.map {
+                            String(format: "%.1f Hz", $0)
                         } ?? "—")
                             .monospacedDigit()
                     }
@@ -986,7 +1010,7 @@ private struct CalculationSettingsView: View {
                     Text("Zero change means the sensor sees little difference from its captured baseline; it does not prove that current is zero. Start the measurement away from the cable, hold still until the baseline is ready, then move the phone close to the insulated cable.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
-                    Text("A charger cable can produce little measurable external field because its paired conductors partly cancel. Core Motion's delivered update interval is not a guarantee that the sensor resolves 50/60 Hz current or its RMS value.")
+                    Text("A charger cable can produce little measurable external field because its paired conductors partly cancel. The requested update interval is not the actual sample rate; use the rate above. Changing the request to 80 Hz can reduce synchronization with 50 Hz mains in some devices, but cannot reconstruct a true AC RMS waveform.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -996,6 +1020,8 @@ private struct CalculationSettingsView: View {
                     Text("Readings below 0.5 µT, or below five times the measured baseline noise, are treated as too weak. Low or uncalibrated sensor status lowers confidence. These estimates are not a substitute for a clamp meter.")
                 }
             }
+            .scrollContentBackground(colorScheme == .dark ? .hidden : .visible)
+            .background(colorScheme == .dark ? Color.black : Color(uiColor: .systemGroupedBackground))
             .navigationTitle("Calculation Setup")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
