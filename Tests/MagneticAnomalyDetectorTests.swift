@@ -185,6 +185,30 @@ struct MagneticAnomalyDetectorTests {
             minimumPairs: 10
         ) == nil, "bias calibration must reject insufficient paired samples")
 
+        // Time-aware EMA should reach the same result over the same elapsed time,
+        // even if the sensor delivery rate falls from 40 Hz to 20 Hz.
+        var fastTimedFilter = FieldDeltaFilter(windowSize: 1, smoothingFactor: 0.40)
+        var slowTimedFilter = FieldDeltaFilter(windowSize: 1, smoothingFactor: 0.40)
+        _ = fastTimedFilter.update(0.0, timestamp: 0.0)
+        _ = slowTimedFilter.update(0.0, timestamp: 0.0)
+        var fastValue: Double?
+        var slowValue: Double?
+        for step in 1...8 {
+            fastValue = fastTimedFilter.update(10.0, timestamp: Double(step) * 0.025)
+        }
+        for step in 1...4 {
+            slowValue = slowTimedFilter.update(10.0, timestamp: Double(step) * 0.05)
+        }
+        expect(abs((fastValue ?? -1) - (slowValue ?? -1)) < 1e-8,
+               "time-aware EMA should have consistent response across sample rates")
+
+        var timestampFilter = FieldDeltaFilter(windowSize: 1)
+        _ = timestampFilter.update(1.0, timestamp: 1.0)
+        expect(timestampFilter.update(2.0, timestamp: 0.9) == nil,
+               "non-monotonic sensor timestamps must be rejected")
+        expect(timestampFilter.update(2.0, timestamp: .nan) == nil,
+               "non-finite sensor timestamps must be rejected")
+
         print("PASS: MagneticAnomalyDetectorTests")
     }
 }

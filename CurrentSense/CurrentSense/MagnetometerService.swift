@@ -424,7 +424,7 @@ final class MagnetometerService: ObservableObject {
         let deltaMagnitude = anomalyDetector.baselineVector.map {
             referenceVector.distance(to: $0)
         }
-        let filteredDeltaMagnitude = fieldDeltaFilter.update(deltaMagnitude)
+        let filteredDeltaMagnitude = fieldDeltaFilter.update(deltaMagnitude, timestamp: reading.timestamp)
         let sample = MagneticSample(
             timestamp: sampleDate(for: reading),
             x: reading.rawField.x,

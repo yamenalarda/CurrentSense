@@ -178,18 +178,58 @@ struct MagneticAnomalyDetector {
 struct FieldDeltaFilter {
     private var window: [Double] = []
     private var smoothedValue: Double?
+    private var lastTimestamp: TimeInterval?
     private let windowSize: Int
     private let smoothingFactor: Double
+    private let smoothingTimeConstant: TimeInterval
 
-    init(windowSize: Int = 7, smoothingFactor: Double = 0.40) {
+    init(
+        windowSize: Int = 7,
+        smoothingFactor: Double = 0.40,
+        nominalSampleInterval: TimeInterval = 1.0 / 40.0
+    ) {
         self.windowSize = max(1, windowSize)
-        self.smoothingFactor = min(max(smoothingFactor, 0.01), 1.0)
+        let clampedFactor = min(max(smoothingFactor, 0.01), 1.0)
+        self.smoothingFactor = clampedFactor
+        let nominalInterval = nominalSampleInterval.isFinite && nominalSampleInterval > 0
+            ? nominalSampleInterval : 1.0 / 40.0
+        // Calibrate the time constant so alpha=0.40 at the nominal 40 Hz rate.
+        self.smoothingTimeConstant = clampedFactor >= 1.0
+            ? 0.0
+            : -nominalInterval / log(1.0 - clampedFactor)
     }
 
-    mutating func update(_ rawValue: Double?) -> Double? {
+    /// If timestamps are supplied, the EMA follows elapsed time rather than assuming
+    /// every delivered sensor sample arrived exactly on schedule. Timestamp-free use
+    /// retains the fixed-coefficient behavior for compatibility and unit tests.
+    mutating func update(_ rawValue: Double?, timestamp: TimeInterval? = nil) -> Double? {
         guard let rawValue, rawValue.isFinite, rawValue >= 0 else {
             reset()
             return nil
+        }
+
+        let alpha: Double
+        if let timestamp {
+            guard timestamp.isFinite else {
+                reset()
+                return nil
+            }
+            if let previousTimestamp = lastTimestamp {
+                let elapsed = timestamp - previousTimestamp
+                guard elapsed > 0 else {
+                    reset()
+                    return nil
+                }
+                alpha = smoothingTimeConstant == 0
+                    ? 1.0
+                    : min(max(1.0 - exp(-elapsed / smoothingTimeConstant), 0.0), 1.0)
+            } else {
+                alpha = smoothingFactor
+            }
+            lastTimestamp = timestamp
+        } else {
+            lastTimestamp = nil
+            alpha = smoothingFactor
         }
 
         window.append(rawValue)
@@ -199,7 +239,7 @@ struct FieldDeltaFilter {
 
         let robustValue = MagneticAnomalyDetector.median(window)
         if let previous = smoothedValue {
-            smoothedValue = previous + (robustValue - previous) * smoothingFactor
+            smoothedValue = previous + (robustValue - previous) * alpha
         } else {
             smoothedValue = robustValue
         }
@@ -209,6 +249,7 @@ struct FieldDeltaFilter {
     mutating func reset() {
         window.removeAll(keepingCapacity: true)
         smoothedValue = nil
+        lastTimestamp = nil
     }
 }
 
