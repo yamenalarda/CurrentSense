@@ -612,7 +612,7 @@ struct ContentView: View {
                             : ((fieldMagnitude ?? 0) < sensor.minimumUsableFieldChangeMicrotesla
                                 ? String(format: "Below %.3f µT noise threshold",
                                          sensor.minimumUsableFieldChangeMicrotesla)
-                                : (mode == .dc ? "1.5 s rolling median" : "Filtered vs baseline")))),
+                                : (mode == .dc ? "2.4 s rolling median" : "Filtered vs baseline")))),
                 tint: fieldColor
             )
             separator
