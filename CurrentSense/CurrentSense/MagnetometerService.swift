@@ -52,6 +52,7 @@ final class MagnetometerService: ObservableObject {
     private var lastDeliveryTimestamp: TimeInterval?
     private var smoothedDeliveryRateHz: Double?
     private var baselineStartTimestamp: TimeInterval?
+    private var baselineStartWallClock: Date?
     private var baselineSampleCount = 0
     private var baselineSumX = 0.0
     private var baselineSumY = 0.0
@@ -61,12 +62,12 @@ final class MagnetometerService: ObservableObject {
     private var baselineZ: Double?
 
     init() {
-        isAvailable = motionManager.isDeviceMotionAvailable
+        isAvailable = motionManager.isDeviceMotionAvailable && motionManager.isMagnetometerAvailable
     }
 
     func start() {
-        guard motionManager.isDeviceMotionAvailable else {
-            errorMessage = "Calibrated magnetic-field data is unavailable on this device."
+        guard motionManager.isDeviceMotionAvailable && motionManager.isMagnetometerAvailable else {
+            errorMessage = "Device motion or magnetometer is unavailable on this device."
             isAvailable = false
             return
         }
@@ -83,6 +84,7 @@ final class MagnetometerService: ObservableObject {
         baselineCaptured = false
         calibrationQuality = "Unknown"
         baselineStartTimestamp = nil
+        baselineStartWallClock = nil
         baselineSampleCount = 0
         baselineSumX = 0
         baselineSumY = 0
@@ -113,6 +115,7 @@ final class MagnetometerService: ObservableObject {
             let z = field.z
             guard x.isFinite, y.isFinite, z.isFinite else { return }
             let deliveryTimestamp = motion.timestamp
+            let deliveryWallClock = Date()
             let calibrationQuality: String
             switch motion.magneticField.accuracy {
             case .high: calibrationQuality = "High"
@@ -130,6 +133,14 @@ final class MagnetometerService: ObservableObject {
 
                 if self.baselineStartTimestamp == nil {
                     self.baselineStartTimestamp = deliveryTimestamp
+                    self.baselineStartWallClock = deliveryWallClock
+                }
+                let sampleTimestamp: Date
+                if let startMotionTime = self.baselineStartTimestamp,
+                   let startWallClock = self.baselineStartWallClock {
+                    sampleTimestamp = startWallClock.addingTimeInterval(deliveryTimestamp - startMotionTime)
+                } else {
+                    sampleTimestamp = deliveryWallClock
                 }
 
                 // Average the first two seconds as an environmental reference.
@@ -161,7 +172,7 @@ final class MagnetometerService: ObservableObject {
                 }
 
                 let sample = MagneticSample(
-                    timestamp: Date(),
+                    timestamp: sampleTimestamp,
                     x: x,
                     y: y,
                     z: z,
@@ -224,6 +235,7 @@ final class MagnetometerService: ObservableObject {
         baselineCaptured = false
         calibrationQuality = "Unknown"
         baselineStartTimestamp = nil
+        baselineStartWallClock = nil
         baselineSampleCount = 0
         baselineSumX = 0
         baselineSumY = 0
