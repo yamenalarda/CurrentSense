@@ -86,7 +86,7 @@ struct ContentView: View {
     private var referenceCurrentA = "1.0"
     @AppStorage("CurrentSense.calibration.acSensitivity")
     private var acSensitivityMicroteslaPerAmp = 0.0
-    @AppStorage("CurrentSense.calibration.dcSensitivity.v2")
+    @AppStorage("CurrentSense.calibration.dcSensitivity.v3")
     private var dcSensitivityMicroteslaPerAmp = 0.0
 
     private var primaryTextColor: Color {
@@ -102,7 +102,7 @@ struct ContentView: View {
     // Only display a field-change value during an active measurement.
     // In standby, the detector is communicated solely through the small orb's appearance.
     private var fieldMagnitude: Double? {
-        guard sensor.isRunning else { return nil }
+        guard sensor.isRunning, sensor.isOrientationStable else { return nil }
         if mode == .dc {
             // A 15-point rolling median reduces the effect of isolated spikes in DC estimates.
             let window = sensor.samples.suffix(15)
@@ -150,7 +150,7 @@ struct ContentView: View {
                         .font(.system(size: 10, weight: .bold, design: .rounded))
                         .tracking(1.2)
                         .foregroundStyle(mutedTextColor)
-                    Text(level.title)
+                    Text(sensor.isRunning && !sensor.isOrientationStable ? "Hold phone still" : level.title)
                         .font(.system(size: 18, weight: .semibold, design: .rounded))
                         .foregroundStyle(primaryTextColor)
                         .contentTransition(.opacity)
@@ -206,7 +206,9 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            Text("Relative response only. Actual reach depends on current, cable geometry, orientation and phone position.")
+            Text(sensor.isRunning && !sensor.isOrientationStable
+                 ? "Measurement paused while the phone rotates. Hold still to resume."
+                 : "Relative response only. Actual reach depends on current, cable geometry, orientation and phone position.")
                 .font(.system(size: 10, weight: .regular, design: .rounded))
                 .foregroundStyle(secondaryTextColor)
                 .fixedSize(horizontal: false, vertical: true)
@@ -421,11 +423,13 @@ struct ContentView: View {
             Text(
                 !sensor.isRunning
                     ? (mode == .ac ? "Tap the circle to start field scan" : "Tap the circle to begin")
-                    : (!sensor.baselineCaptured
-                        ? "Capturing baseline — hold still away from cable"
-                        : (mode == .ac
-                            ? "Scan slowly along the insulated cable"
-                            : "Baseline ready — move phone near the conductor"))
+                    : (!sensor.isOrientationStable
+                        ? "Hold the phone still — stabilizing the reading"
+                        : (!sensor.baselineCaptured
+                            ? "Capturing baseline — hold still away from cable"
+                            : (mode == .ac
+                                ? "Scan slowly along the insulated cable"
+                                : "Baseline ready — move phone near the conductor")))
             )
             .font(.system(size: 16, weight: .medium, design: .rounded))
             .foregroundStyle(primaryTextColor)
@@ -437,11 +441,13 @@ struct ContentView: View {
                     ? (mode == .ac
                         ? "AC shows relative magnetic activity, not voltage or current numbers."
                         : "Start away from the conductor and hold still while the baseline is captured.")
-                    : (!sensor.baselineCaptured
-                        ? "Keep the phone still until the reference is ready."
-                        : (mode == .ac
-                            ? "Keep the phone still at each point; movement itself can change the field."
-                            : "DC estimates use a rolling median. Keep position and orientation fixed."))
+                    : (!sensor.isOrientationStable
+                        ? "Fast rotation is temporarily ignored to prevent false field spikes."
+                        : (!sensor.baselineCaptured
+                            ? "Keep the phone still until the reference is ready."
+                            : (mode == .ac
+                                ? "Keep the phone still at each point; movement itself can change the field."
+                                : "DC estimates use a rolling median. Keep position and orientation fixed.")))
             )
             .font(.system(size: 12, weight: .regular, design: .rounded))
             .foregroundStyle(secondaryTextColor)
@@ -459,14 +465,16 @@ struct ContentView: View {
                     Circle()
                         .fill(sensor.baselineCaptured ? fieldColor : .yellow)
                         .frame(width: 6, height: 6)
-                    Text(sensor.baselineCaptured
-                         ? (mode == .ac
-                            ? acScanLevel.title.uppercased()
-                            : (fieldMagnitude == nil ? "STABILIZING DC SIGNAL" : "STABLE DC WINDOW"))
-                         : "CAPTURING BASELINE")
+                    Text(!sensor.isOrientationStable
+                         ? "HOLD PHONE STILL"
+                         : (sensor.baselineCaptured
+                            ? (mode == .ac
+                                ? acScanLevel.title.uppercased()
+                                : (fieldMagnitude == nil ? "STABILIZING DC SIGNAL" : "STABLE DC WINDOW"))
+                            : "CAPTURING BASELINE"))
                         .font(.system(size: 10, weight: .bold, design: .rounded))
                         .tracking(1.0)
-                        .foregroundStyle(sensor.baselineCaptured
+                        .foregroundStyle(sensor.isOrientationStable && sensor.baselineCaptured
                                          ? (mode == .ac ? acScanColor : fieldColor)
                                          : .yellow)
                     Text("· CAL \\(sensor.calibrationQuality.uppercased())")
