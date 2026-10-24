@@ -12,13 +12,16 @@ struct MagneticSample: Identifiable {
     let z: Double
     /// Total field magnitude, including the Earth's field.
     let magnitude: Double
-    /// Vector difference from the baseline captured when monitoring started.
+    /// Raw vector difference from the baseline, before filtering.
     let deltaMagnitude: Double?
+    /// Robust median/EMA-filtered difference used for display and estimation.
+    let filteredDeltaMagnitude: Double?
     let calibrationQuality: String
 
     func csvRow(using formatter: ISO8601DateFormatter) -> String {
-        let delta = deltaMagnitude.map { String($0) } ?? ""
-        return "\(formatter.string(from: timestamp)),\(x),\(y),\(z),\(magnitude),\(delta),\(calibrationQuality)"
+        let rawDelta = deltaMagnitude.map { String($0) } ?? ""
+        let filteredDelta = filteredDeltaMagnitude.map { String($0) } ?? ""
+        return "\(formatter.string(from: timestamp)),\(x),\(y),\(z),\(magnitude),\(rawDelta),\(filteredDelta),\(calibrationQuality)"
     }
 }
 
@@ -35,7 +38,16 @@ final class MagnetometerService: ObservableObject {
     @Published private(set) var errorMessage: String?
     @Published private(set) var observedDeliveryRateHz: Double?
     @Published private(set) var baselineCaptured = false
+    @Published private(set) var baselineNoiseSigmaMicrotesla: Double?
     @Published private(set) var calibrationQuality = "Unknown"
+
+    /// At least 0.5 µT, raised when baseline noise is high.
+    var minimumUsableFieldChangeMicrotesla: Double {
+        guard let noise = baselineNoiseSigmaMicrotesla, noise.isFinite, noise > 0 else {
+            return 0.5
+        }
+        return max(0.5, noise * 5.0)
+    }
 
     private let motionManager = CMMotionManager()
     private let queue: OperationQueue = {
@@ -52,7 +64,10 @@ final class MagnetometerService: ObservableObject {
     private let baselineCaptureDuration: TimeInterval = 2.0
     private let minimumBaselineSamples = 10
     private let standbyUpdateInterval: TimeInterval = 1.0 / 10.0
-    private let measurementUpdateInterval: TimeInterval = 1.0 / 100.0
+    // Do not request exactly 100 Hz (the Nyquist boundary for 50 Hz mains).
+    // The non-synchronous target can help reveal changes, but cannot guarantee
+    // waveform reconstruction or true-RMS AC measurement.
+    private let measurementUpdateInterval: TimeInterval = 1.0 / 80.0
 
     private var rawSamples: [MagneticSample] = []
     private var lastUIPublish: Date = .distantPast
@@ -65,6 +80,7 @@ final class MagnetometerService: ObservableObject {
     private var baselineSampleCount = 0
     private var baselineVectors: [MagneticFieldVector] = []
     private var anomalyDetector = MagneticAnomalyDetector()
+    private var fieldDeltaFilter = FieldDeltaFilter()
 
     init() {
         isAvailable = motionManager.isDeviceMotionAvailable && motionManager.isMagnetometerAvailable
@@ -151,6 +167,8 @@ final class MagnetometerService: ObservableObject {
         baselineSampleCount = 0
         baselineVectors.removeAll(keepingCapacity: true)
         anomalyDetector.reset()
+        fieldDeltaFilter.reset()
+        baselineNoiseSigmaMicrotesla = nil
         magneticSourceDetected = false
         latestSample = nil
         calibrationQuality = "Unknown"
@@ -233,6 +251,7 @@ final class MagnetometerService: ObservableObject {
                 let deltaMagnitude = self.anomalyDetector.baselineVector.map {
                     referenceVector.distance(to: $0)
                 }
+                let filteredDeltaMagnitude = self.fieldDeltaFilter.update(deltaMagnitude)
 
                 let sample = MagneticSample(
                     timestamp: sampleTimestamp,
@@ -241,6 +260,7 @@ final class MagnetometerService: ObservableObject {
                     z: z,
                     magnitude: magnitude,
                     deltaMagnitude: deltaMagnitude,
+                    filteredDeltaMagnitude: filteredDeltaMagnitude,
                     calibrationQuality: calibrationQuality
                 )
 
@@ -298,6 +318,10 @@ final class MagnetometerService: ObservableObject {
 
         anomalyDetector.setBaseline(from: baselineVectors)
         baselineCaptured = anomalyDetector.hasBaseline
+        baselineNoiseSigmaMicrotesla = anomalyDetector.hasBaseline
+            ? anomalyDetector.noiseSigmaEstimate
+            : nil
+        fieldDeltaFilter.reset()
         baselineVectors.removeAll(keepingCapacity: true)
     }
 
@@ -324,7 +348,7 @@ final class MagnetometerService: ObservableObject {
 
     func exportCSV() -> URL? {
         guard !rawSamples.isEmpty else { return nil }
-        let header = "timestamp_iso8601,device_x_uT,device_y_uT,device_z_uT,total_magnitude_uT,reference_vector_delta_uT,calibration_quality"
+        let header = "timestamp_iso8601,device_x_uT,device_y_uT,device_z_uT,total_magnitude_uT,raw_reference_vector_delta_uT,filtered_reference_vector_delta_uT,calibration_quality"
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let body = rawSamples.map { $0.csvRow(using: formatter) }.joined(separator: "\n")
