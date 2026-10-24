@@ -5,8 +5,8 @@ import Combine
 struct MagneticSample: Identifiable {
     let id = UUID()
     /// Wall-clock time when Core Motion delivered this sample to the app.
-    /// This is not the sensor's hardware acquisition timestamp.
     let timestamp: Date
+    /// Calibrated magnetic-field components in microtesla, when available.
     let x: Double
     let y: Double
     let z: Double
@@ -23,9 +23,9 @@ final class MagnetometerService: ObservableObject {
     @Published private(set) var isAvailable = false
     @Published private(set) var isRunning = false
     @Published private(set) var latestSample: MagneticSample?
-    /// UI/chart snapshots are published at a lower rate to keep animations smooth.
     @Published private(set) var samples: [MagneticSample] = []
     @Published private(set) var errorMessage: String?
+    @Published private(set) var observedDeliveryRateHz: Double?
 
     private let motionManager = CMMotionManager()
     private let queue: OperationQueue = {
@@ -42,15 +42,14 @@ final class MagnetometerService: ObservableObject {
     private var rawSamples: [MagneticSample] = []
     private var lastUIPublish: Date = .distantPast
     private var lastDeliveryTimestamp: TimeInterval?
-    @Published private(set) var observedDeliveryRateHz: Double?
 
     init() {
-        isAvailable = motionManager.isMagnetometerAvailable
+        isAvailable = motionManager.isDeviceMotionAvailable
     }
 
     func start() {
-        guard motionManager.isMagnetometerAvailable else {
-            errorMessage = "The magnetometer is not available on this device."
+        guard motionManager.isDeviceMotionAvailable else {
+            errorMessage = "Calibrated magnetic-field data is unavailable on this device."
             isAvailable = false
             return
         }
@@ -64,24 +63,27 @@ final class MagnetometerService: ObservableObject {
         lastDeliveryTimestamp = nil
         observedDeliveryRateHz = nil
 
-        // Requested interval only; Core Motion/hardware may deliver at a different rate.
-        motionManager.magnetometerUpdateInterval = 1.0 / 50.0
-        motionManager.startMagnetometerUpdates(to: queue) { [weak self] data, error in
+        // Core Motion's deviceMotion magneticField is calibrated by Core Motion.
+        // This is not a lab-grade calibrated ammeter or a guarantee of 50 Hz bandwidth.
+        motionManager.deviceMotionUpdateInterval = 1.0 / 50.0
+        motionManager.startDeviceMotionUpdates(using: .xArbitraryCorrectedZVertical,
+                                              to: queue) { [weak self] motion, error in
             if let error {
                 Task { @MainActor in
                     guard let self else { return }
-                    self.errorMessage = "Magnetometer update failed: \(error.localizedDescription)"
+                    self.errorMessage = "Motion update failed: \(error.localizedDescription)"
                     self.stop()
                 }
                 return
             }
-            guard let data else { return }
+            guard let motion else { return }
 
-            let field = data.magneticField
+            let field = motion.magneticField.field
             let x = field.x
             let y = field.y
             let z = field.z
             guard x.isFinite, y.isFinite, z.isFinite else { return }
+
             let sample = MagneticSample(
                 timestamp: Date(),
                 x: x,
@@ -89,7 +91,7 @@ final class MagnetometerService: ObservableObject {
                 z: z,
                 magnitude: sqrt(x * x + y * y + z * z)
             )
-            let deliveryTimestamp = data.timestamp
+            let deliveryTimestamp = motion.timestamp
 
             Task { @MainActor in
                 guard let self, self.isRunning else { return }
@@ -105,10 +107,8 @@ final class MagnetometerService: ObservableObject {
                     }
                 }
                 self.lastDeliveryTimestamp = deliveryTimestamp
-
-                // Keep the prominent numeric readout responsive, but don't force a
-                // full chart/layout refresh for every Core Motion callback.
                 self.latestSample = sample
+
                 let now = Date()
                 if now.timeIntervalSince(self.lastUIPublish) >= self.uiPublishInterval {
                     self.samples.append(sample)
@@ -123,9 +123,8 @@ final class MagnetometerService: ObservableObject {
     }
 
     func stop() {
-        motionManager.stopMagnetometerUpdates()
+        motionManager.stopDeviceMotionUpdates()
         isRunning = false
-        // Preserve the latest point on pause without copying the full raw recording.
         if let latestSample, samples.last?.id != latestSample.id {
             samples.append(latestSample)
             if samples.count > maximumChartSamples {
@@ -160,6 +159,6 @@ final class MagnetometerService: ObservableObject {
     }
 
     deinit {
-        motionManager.stopMagnetometerUpdates()
+        motionManager.stopDeviceMotionUpdates()
     }
 }
