@@ -32,6 +32,15 @@ struct MagneticAnomalyDetectorTests {
         expect(abs((center?.y ?? 0) - 50.0) < 0.001,
                "y baseline median should resist an outlier")
 
+        // A 90-degree device rotation should preserve the same reference-frame field.
+        let rotatedField = MagneticFieldVector(x: 50.0, y: 0.0, z: 0.0).rotated(
+            m11: 0, m12: -1, m13: 0,
+            m21: 1, m22: 0, m23: 0,
+            m31: 0, m32: 0, m33: 1
+        )
+        expect(rotatedField.distance(to: MagneticFieldVector(x: 0, y: 50, z: 0)) < 0.001,
+               "orientation transform should map device field to reference frame")
+
         let stable = MagneticFieldVector(x: 0.1, y: 50.1, z: 0.0)
         for _ in 0..<30 { _ = detector.update(vector: stable) }
         expect(!detector.isDetected, "stable field should stay undetected")
