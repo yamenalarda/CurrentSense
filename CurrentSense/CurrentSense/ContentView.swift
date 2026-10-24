@@ -84,8 +84,12 @@ struct ContentView: View {
         colorScheme == .dark ? .white.opacity(0.58) : .black.opacity(0.56)
     }
 
-    // Show field change from the captured background baseline, not Earth's total field.
-    private var fieldMagnitude: Double? { sensor.latestSample?.deltaMagnitude }
+    // Only display a field-change value during an active measurement.
+    // In standby, the detector is communicated solely through the small orb's appearance.
+    private var fieldMagnitude: Double? {
+        guard sensor.isRunning else { return nil }
+        return sensor.latestSample?.deltaMagnitude
+    }
     private var fieldColor: Color { FieldPalette.color(for: fieldMagnitude ?? 0) }
 
     var body: some View {
@@ -262,7 +266,9 @@ struct ContentView: View {
             metricColumn(title: "FIELD CHANGE",
                          value: fieldMagnitude.map { String(format: "%.1f", $0) } ?? "—",
                          unit: "µT",
-                         detail: sensor.baselineCaptured ? "Relative to baseline" : (sensor.isRunning ? "Capturing baseline" : "Baseline required"),
+                         detail: !sensor.isRunning
+                            ? "Start measuring"
+                            : (sensor.baselineCaptured ? "Relative to baseline" : "Capturing baseline"),
                          tint: fieldColor)
             separator
             metricColumn(title: "DISTANCE", value: "—", unit: "cm",
