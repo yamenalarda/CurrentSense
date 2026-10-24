@@ -154,123 +154,8 @@ struct ContentView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            ZStack {
-                FieldPalette.background(for: colorScheme).ignoresSafeArea()
-                ambientGlow
-                VStack(spacing: 0) {
-                    HStack(spacing: 10) {
-                        modePicker
-                        Button {
-                            showCalculationSetup = true
-                        } label: {
-                            Image(systemName: "slider.horizontal.3")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(primaryTextColor)
-                                .frame(width: 42, height: 42)
-                                .background(.ultraThinMaterial, in: Circle())
-                                .overlay(Circle().stroke(
-                                    colorScheme == .dark ? .white.opacity(0.18) : .black.opacity(0.10),
-                                    lineWidth: 1
-                                ))
-                        }
-                        .accessibilityLabel("Calculation settings")
-                    }
-                    .padding(.top, 16)
-                    .padding(.horizontal, 16)
-
-                    Spacer(minLength: 12)
-
-                    FieldOrb(isMeasuring: sensor.isRunning,
-                             magnitude: fieldMagnitude ?? 0,
-                             tint: fieldColor,
-                             proximitySignal: sensor.magneticSourceDetected)
-                        .frame(
-                            width: sensor.isRunning
-                                ? min(geometry.size.width * 0.86, geometry.size.height * 0.48)
-                                : min(geometry.size.width * 0.48, geometry.size.height * 0.27),
-                            height: sensor.isRunning
-                                ? min(geometry.size.width * 0.86, geometry.size.height * 0.48)
-                                : min(geometry.size.width * 0.48, geometry.size.height * 0.27)
-                        )
-                        .contentShape(Circle())
-                        .onTapGesture { toggleMeasurement() }
-                        .accessibilityElement()
-                        .accessibilityLabel(sensor.isRunning ? "Stop measurement" : "Start measurement")
-                        .accessibilityHint("Tap the glass sphere to start or stop measuring.")
-                        .accessibilityAddTraits(.isButton)
-                        .padding(.top, 4)
-
-                    VStack(spacing: 8) {
-                        Text(
-                            !sensor.isRunning
-                                ? "Tap the circle to begin"
-                                : (!sensor.baselineCaptured
-                                    ? "Capturing baseline — keep iPhone away from cable"
-                                    : "Baseline ready — move iPhone near the cable")
-                        )
-                        .font(.system(size: 16, weight: .medium, design: .rounded))
-                        .foregroundStyle(primaryTextColor)
-                        .multilineTextAlignment(.center)
-                        .contentTransition(.opacity)
-                        Text(
-                            !sensor.isRunning
-                                ? "Start away from the cable and hold still while the baseline is captured."
-                                : (mode == .ac
-                                    ? "AC estimates need same-setup calibration and may not represent true RMS."
-                                    : "Keep the phone still. Estimate depends on wiring setup and reference.")
-                        )
-                        .font(.system(size: 12, weight: .regular, design: .rounded))
-                        .foregroundStyle(secondaryTextColor)
-                        .multilineTextAlignment(.center)
-                        if let error = sensor.errorMessage {
-                            Text(error)
-                                .font(.caption)
-                                .foregroundStyle(.orange)
-                                .multilineTextAlignment(.center)
-                        }
-                        if sensor.isRunning {
-                            HStack(spacing: 6) {
-                                Circle().fill(sensor.baselineCaptured ? fieldColor : .yellow).frame(width: 6, height: 6)
-                                Text(sensor.baselineCaptured ? "LIVE FIELD CHANGE" : "CAPTURING BASELINE")
-                                    .font(.system(size: 10, weight: .bold, design: .rounded))
-                                    .tracking(1.2)
-                                    .foregroundStyle(sensor.baselineCaptured ? fieldColor : .yellow)
-                                Text("· CAL \(sensor.calibrationQuality.uppercased())")
-                                    .font(.system(size: 9, weight: .semibold, design: .rounded))
-                                    .foregroundStyle(sensor.calibrationQuality == "High"
-                                                     ? (colorScheme == .dark ? .white.opacity(0.72) : .black.opacity(0.65))
-                                                     : .yellow.opacity(0.9))
-                                if let rate = sensor.observedDeliveryRateHz {
-                                    Text(String(format: "· %.0f Hz", rate))
-                                        .font(.system(size: 10, weight: .medium, design: .rounded))
-                                        .foregroundStyle(secondaryTextColor)
-                                }
-                            }
-                            .padding(.top, 2)
-                        }
-                        if sensor.isRunning, let caution = estimate.caution {
-                            Text(caution)
-                                .font(.system(size: 10, weight: .regular, design: .rounded))
-                                .foregroundStyle(colorScheme == .dark ? .white.opacity(0.62) : .black.opacity(0.62))
-                                .multilineTextAlignment(.center)
-                                .lineLimit(3)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                    .padding(.horizontal, 28)
-                    .padding(.top, 20)
-
-                    Spacer(minLength: 16)
-
-                    measurementBar
-                        .padding(.horizontal, 18)
-                        .padding(.bottom, max(geometry.safeAreaInsets.bottom == 0 ? 14 : 8, 8))
-                }
-                .padding(.horizontal, 8)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            contentLayout(in: geometry)
         }
-        // No preferredColorScheme override: SwiftUI follows the device's appearance.
         .tint(colorScheme == .dark ? .white : .black)
         .animation(.spring(response: 0.42, dampingFraction: 0.78), value: sensor.isRunning)
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: mode)
@@ -289,21 +174,166 @@ struct ContentView: View {
         }
         .onDisappear { sensor.stopMonitoring() }
         .sheet(isPresented: $showCalculationSetup) {
-            CalculationSettingsView(
-                isAC: mode == .ac,
-                sensor: sensor,
-                onCalibrate: { referenceAmps, fieldMicrotesla, isAC in
-                    let sensitivity = fieldMicrotesla / referenceAmps
-                    guard sensitivity.isFinite, sensitivity > 0 else { return }
-                    if isAC {
-                        acSensitivityMicroteslaPerAmp = sensitivity
-                    } else {
-                        dcSensitivityMicroteslaPerAmp = sensitivity
+            calculationSettingsSheet
+        }
+    }
+
+    private func contentLayout(in geometry: GeometryProxy) -> some View {
+        ZStack {
+            FieldPalette.background(for: colorScheme).ignoresSafeArea()
+            ambientGlow
+            VStack(spacing: 0) {
+                controlRow
+                Spacer(minLength: 12)
+                measurementOrb(in: geometry)
+                measurementInstructions
+                Spacer(minLength: 16)
+                measurementBar
+                    .padding(.horizontal, 18)
+                    .padding(.bottom, max(geometry.safeAreaInsets.bottom == 0 ? 14 : 8, 8))
+            }
+            .padding(.horizontal, 8)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var controlRow: some View {
+        HStack(spacing: 10) {
+            modePicker
+            Button {
+                showCalculationSetup = true
+            } label: {
+                Image(systemName: "slider.horizontal.3")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(primaryTextColor)
+                    .frame(width: 42, height: 42)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .overlay(Circle().stroke(
+                        colorScheme == .dark ? .white.opacity(0.18) : .black.opacity(0.10),
+                        lineWidth: 1
+                    ))
+            }
+            .accessibilityLabel("Calculation settings")
+        }
+        .padding(.top, 16)
+        .padding(.horizontal, 16)
+    }
+
+    private func measurementOrb(in geometry: GeometryProxy) -> some View {
+        FieldOrb(
+            isMeasuring: sensor.isRunning,
+            magnitude: fieldMagnitude ?? 0,
+            tint: fieldColor,
+            proximitySignal: sensor.magneticSourceDetected
+        )
+        .frame(
+            width: sensor.isRunning
+                ? min(geometry.size.width * 0.86, geometry.size.height * 0.48)
+                : min(geometry.size.width * 0.48, geometry.size.height * 0.27),
+            height: sensor.isRunning
+                ? min(geometry.size.width * 0.86, geometry.size.height * 0.48)
+                : min(geometry.size.width * 0.48, geometry.size.height * 0.27)
+        )
+        .contentShape(Circle())
+        .onTapGesture { toggleMeasurement() }
+        .accessibilityElement()
+        .accessibilityLabel(sensor.isRunning ? "Stop measurement" : "Start measurement")
+        .accessibilityHint("Tap the glass sphere to start or stop measuring.")
+        .accessibilityAddTraits(.isButton)
+        .padding(.top, 4)
+    }
+
+    private var measurementInstructions: some View {
+        VStack(spacing: 8) {
+            Text(
+                !sensor.isRunning
+                    ? "Tap the circle to begin"
+                    : (!sensor.baselineCaptured
+                        ? "Capturing baseline — keep iPhone away from cable"
+                        : "Baseline ready — move iPhone near the cable")
+            )
+            .font(.system(size: 16, weight: .medium, design: .rounded))
+            .foregroundStyle(primaryTextColor)
+            .multilineTextAlignment(.center)
+            .contentTransition(.opacity)
+
+            Text(
+                !sensor.isRunning
+                    ? "Start away from the cable and hold still while the baseline is captured."
+                    : (mode == .ac
+                        ? "AC estimates need same-setup calibration and may not represent true RMS."
+                        : "Keep the phone still. Estimate depends on wiring setup and reference.")
+            )
+            .font(.system(size: 12, weight: .regular, design: .rounded))
+            .foregroundStyle(secondaryTextColor)
+            .multilineTextAlignment(.center)
+
+            if let error = sensor.errorMessage {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .multilineTextAlignment(.center)
+            }
+
+            if sensor.isRunning {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(sensor.baselineCaptured ? fieldColor : .yellow)
+                        .frame(width: 6, height: 6)
+                    Text(sensor.baselineCaptured ? "LIVE FIELD CHANGE" : "CAPTURING BASELINE")
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .tracking(1.2)
+                        .foregroundStyle(sensor.baselineCaptured ? fieldColor : .yellow)
+                    Text("· CAL \(sensor.calibrationQuality.uppercased())")
+                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                        .foregroundStyle(sensor.calibrationQuality == "High"
+                            ? (colorScheme == .dark ? .white.opacity(0.72) : .black.opacity(0.65))
+                            : .yellow.opacity(0.9))
+                    if let rate = sensor.observedDeliveryRateHz {
+                        Text(String(format: "· %.0f Hz", rate))
+                            .font(.system(size: 10, weight: .medium, design: .rounded))
+                            .foregroundStyle(secondaryTextColor)
                     }
                 }
-            )
-            .presentationDetents([.medium, .large])
-            .presentationDragIndicator(.visible)
+                .padding(.top, 2)
+            }
+
+            if sensor.isRunning, let caution = estimate.caution {
+                Text(caution)
+                    .font(.system(size: 10, weight: .regular, design: .rounded))
+                    .foregroundStyle(colorScheme == .dark ? .white.opacity(0.62) : .black.opacity(0.62))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.horizontal, 28)
+        .padding(.top, 20)
+    }
+
+    private var calculationSettingsSheet: some View {
+        CalculationSettingsView(
+            isAC: mode == .ac,
+            sensor: sensor,
+            onCalibrate: { referenceAmps, fieldMicrotesla, acMode in
+                saveCalibration(
+                    referenceAmps: referenceAmps,
+                    fieldMicrotesla: fieldMicrotesla,
+                    isAC: acMode
+                )
+            }
+        )
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+    }
+
+    private func saveCalibration(referenceAmps: Double, fieldMicrotesla: Double, isAC: Bool) {
+        let sensitivity = fieldMicrotesla / referenceAmps
+        guard sensitivity.isFinite, sensitivity > 0 else { return }
+        if isAC {
+            acSensitivityMicroteslaPerAmp = sensitivity
+        } else {
+            dcSensitivityMicroteslaPerAmp = sensitivity
         }
     }
 
