@@ -178,10 +178,10 @@ final class MagnetometerService: ObservableObject {
             // persistent Core Motion reference frame so a phone rotation is less likely
             // to look like a magnetic-source change.
             let rotation = motion.attitude.rotationMatrix
-            let referenceVector = MagneticFieldVector(
-                x: x * rotation.m11 + y * rotation.m12 + z * rotation.m13,
-                y: x * rotation.m21 + y * rotation.m22 + z * rotation.m23,
-                z: x * rotation.m31 + y * rotation.m32 + z * rotation.m33
+            let referenceVector = MagneticFieldVector(x: x, y: y, z: z).rotated(
+                m11: rotation.m11, m12: rotation.m12, m13: rotation.m13,
+                m21: rotation.m21, m22: rotation.m22, m23: rotation.m23,
+                m31: rotation.m31, m32: rotation.m32, m33: rotation.m33
             )
             guard referenceVector.isFinite else { return }
 
