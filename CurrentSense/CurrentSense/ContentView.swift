@@ -461,7 +461,9 @@ struct ContentView: View {
                         .fill(sensor.baselineCaptured ? fieldColor : .yellow)
                         .frame(width: 6, height: 6)
                     Text(sensor.baselineCaptured
-                         ? (mode == .ac ? acScanLevel.title.uppercased() : "STABLE DC WINDOW")
+                         ? (mode == .ac
+                            ? acScanLevel.title.uppercased()
+                            : (fieldMagnitude == nil ? "STABILIZING DC SIGNAL" : "STABLE DC WINDOW"))
                          : "CAPTURING BASELINE")
                         .font(.system(size: 10, weight: .bold, design: .rounded))
                         .tracking(1.0)
@@ -605,10 +607,12 @@ struct ContentView: View {
                     ? "Start measuring"
                     : (!sensor.baselineCaptured
                         ? "Capturing baseline"
-                        : ((fieldMagnitude ?? 0) < sensor.minimumUsableFieldChangeMicrotesla
-                            ? String(format: "Below %.3f µT noise threshold",
-                                     sensor.minimumUsableFieldChangeMicrotesla)
-                            : "1.5 s rolling median")),
+                        : (mode == .dc && fieldMagnitude == nil
+                            ? "Stabilizing DC signal"
+                            : ((fieldMagnitude ?? 0) < sensor.minimumUsableFieldChangeMicrotesla
+                                ? String(format: "Below %.3f µT noise threshold",
+                                         sensor.minimumUsableFieldChangeMicrotesla)
+                                : (mode == .dc ? "1.5 s rolling median" : "Filtered vs baseline")))),
                 tint: fieldColor
             )
             separator
@@ -1023,6 +1027,14 @@ private struct CalculationSettingsView: View {
         isAC ? acSensitivityMicroteslaPerAmp : dcSensitivityMicroteslaPerAmp
     }
 
+    private var stableCalibrationField: Double? {
+        let window = sensor.samples.suffix(15)
+            .compactMap(\.filteredDeltaMagnitude)
+            .filter { $0.isFinite && $0 >= 0 }
+        guard window.count >= 7 else { return nil }
+        return MagneticAnomalyDetector.median(window)
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -1095,7 +1107,7 @@ private struct CalculationSettingsView: View {
                         .disabled(
                             !sensor.isRunning ||
                             !sensor.baselineCaptured ||
-                            (sensor.latestSample?.filteredDeltaMagnitude ?? 0) <
+                            (stableCalibrationField ?? 0) <
                                 sensor.minimumUsableFieldChangeMicrotesla
                         )
 
@@ -1217,14 +1229,10 @@ private struct CalculationSettingsView: View {
             calibrationFeedback = "Start measurement and wait for a stable field reading."
             return
         }
-        let stableWindow = sensor.samples.suffix(15)
-            .compactMap(\.filteredDeltaMagnitude)
-            .filter { $0.isFinite && $0 >= 0 }
-        guard stableWindow.count >= 7 else {
+        guard let field = stableCalibrationField else {
             calibrationFeedback = "Hold the phone still to collect a stable 1.5-second window."
             return
         }
-        let field = MagneticAnomalyDetector.median(stableWindow)
         guard field.isFinite, field >= sensor.minimumUsableFieldChangeMicrotesla else {
             calibrationFeedback = "The signal is below the noise-adjusted calibration threshold."
             return
