@@ -15,16 +15,18 @@ struct MagneticFieldVector {
         return sqrt(dx * dx + dy * dy + dz * dz)
     }
 
-    /// Rotate a device-coordinate vector into Core Motion's reference frame.
+    /// Transform a device-coordinate vector to Core Motion's reference coordinates.
+    /// Core Motion's attitude rotation matrix maps reference-frame vectors to device
+    /// coordinates, so the inverse transform for a rotation matrix is its transpose.
     func rotated(
         m11: Double, m12: Double, m13: Double,
         m21: Double, m22: Double, m23: Double,
         m31: Double, m32: Double, m33: Double
     ) -> MagneticFieldVector {
         MagneticFieldVector(
-            x: x * m11 + y * m12 + z * m13,
-            y: x * m21 + y * m22 + z * m23,
-            z: x * m31 + y * m32 + z * m33
+            x: x * m11 + y * m21 + z * m31,
+            y: x * m12 + y * m22 + z * m32,
+            z: x * m13 + y * m23 + z * m33
         )
     }
 }
