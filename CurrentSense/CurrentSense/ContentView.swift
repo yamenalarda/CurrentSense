@@ -71,6 +71,7 @@ private extension Color {
 
 struct ContentView: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var sensor = MagnetometerService()
     @State private var mode: MeasurementMode = .ac
 
@@ -191,7 +192,18 @@ struct ContentView: View {
         .animation(.spring(response: 0.42, dampingFraction: 0.78), value: sensor.isRunning)
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: mode)
         .animation(.spring(response: 0.45, dampingFraction: 0.76), value: fieldMagnitude)
-        .onAppear { sensor.startMonitoring() }
+        .onAppear {
+            if scenePhase == .active {
+                sensor.startMonitoring()
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                sensor.startMonitoring()
+            } else {
+                sensor.stopMonitoring()
+            }
+        }
         .onDisappear { sensor.stopMonitoring() }
     }
 
