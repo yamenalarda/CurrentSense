@@ -424,11 +424,16 @@ struct ContentView: View {
             separator
             metricColumn(
                 title: "FIELD CHANGE",
-                value: fieldMagnitude.map { String(format: "%.1f", $0) } ?? "—",
+                value: fieldMagnitude.map { String(format: "%.3f", $0) } ?? "—",
                 unit: "µT",
                 detail: !sensor.isRunning
                     ? "Start measuring"
-                    : (sensor.baselineCaptured ? "Relative to baseline" : "Capturing baseline"),
+                    : (!sensor.baselineCaptured
+                        ? "Capturing baseline"
+                        : ((fieldMagnitude ?? 0) <
+                            CurrentEstimateCalculator.minimumUsableFieldChangeMicrotesla
+                            ? "Below 0.5 µT threshold"
+                            : "Relative to baseline")),
                 tint: fieldColor
             )
             separator
