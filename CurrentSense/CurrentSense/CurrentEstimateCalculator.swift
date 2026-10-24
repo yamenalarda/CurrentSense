@@ -73,10 +73,17 @@ enum CurrentEstimateCalculator {
         reference: EstimationReference,
         sensorCalibrationQuality: String
     ) -> CurrentEstimate {
-        guard let field = fieldChangeMicrotesla, field.isFinite, field >= 0 else {
+        guard let field = fieldChangeMicrotesla else {
             return .unavailable(
-                currentDetail: "Need a valid field reading",
-                distanceDetail: "Need a valid field reading"
+                currentDetail: "Start measuring",
+                distanceDetail: "Start measuring"
+            )
+        }
+        guard field.isFinite, field >= 0 else {
+            return .unavailable(
+                currentDetail: "Invalid field reading",
+                distanceDetail: "Invalid field reading",
+                caution: "The sensor value is not finite or is negative. Stop and restart the measurement."
             )
         }
 
