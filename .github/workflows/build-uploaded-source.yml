@@ -22,16 +22,18 @@ jobs:
       BUNDLE_ID: "com.currentsense.app"
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Verify archive is present
         shell: bash
         run: |
           set -euo pipefail
-          test -s CurrentSense-source.zip || {
-            echo "Upload the prepared CurrentSense-source.zip to the repository root first."
+          if [[ ! -s CurrentSense-source.zip ]]; then
+            echo "::error title=Missing source archive::CurrentSense-source.zip is not committed at the repository root."
+            echo "Download the ZIP attachment, upload it to the repository root, and commit the upload."
+            echo "Attaching a file to a chat does not add it to the GitHub repository."
             exit 1
-          }
+          fi
           unzip -t CurrentSense-source.zip | tail -n 2
 
       - name: Record Apple toolchain
@@ -132,8 +134,8 @@ jobs:
           {
             echo "# CurrentSense iOS build report"
             echo
-            echo "- Repository: `$GITHUB_REPOSITORY`"
-            echo "- Commit: `$GITHUB_SHA`"
+            echo "- Repository: \`$GITHUB_REPOSITORY\`"
+            echo "- Commit: \`$GITHUB_SHA\`"
             echo "- Workflow run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
             echo "- Version/build: $MARKETING_VERSION / $GITHUB_RUN_NUMBER"
             echo "- Signing: unsigned; must be signed before installing on a physical iPhone"
@@ -157,7 +159,7 @@ jobs:
 
       - name: Upload iPhone IPA artifact
         if: success()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: CurrentSense-iPhone-unsigned-IPA-b${{ github.run_number }}
           path: |
