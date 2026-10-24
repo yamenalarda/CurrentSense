@@ -35,9 +35,9 @@ struct MagneticSample: Identifiable {
     let calibrationQuality: String
 
     func csvRow(using formatter: ISO8601DateFormatter) -> String {
-        let rawDelta = deltaMagnitude.map { String($0) } ?? ""
+        let delta = deltaMagnitude.map { String($0) } ?? ""
         let filteredDelta = filteredDeltaMagnitude.map { String($0) } ?? ""
-        return "\(formatter.string(from: timestamp)),\(x),\(y),\(z),\(magnitude),\(rawDelta),\(filteredDelta),\(calibrationQuality)"
+        return "\(formatter.string(from: timestamp)),\(x),\(y),\(z),\(magnitude),\(delta),\(filteredDelta),\(calibrationQuality)"
     }
 }
 
@@ -89,7 +89,7 @@ final class MagnetometerService: ObservableObject {
     // waveform reconstruction or true-RMS AC measurement.
     private let measurementUpdateInterval: TimeInterval = 1.0 / 40.0
 
-    private var rawSamples: [MagneticSample] = []
+    private var recordedSamples: [MagneticSample] = []
     private var lastUIPublish: Date = .distantPast
     private var lastDeliveryTimestamp: TimeInterval?
     private var smoothedDeliveryRateHz: Double?
@@ -141,7 +141,7 @@ final class MagnetometerService: ObservableObject {
         // Capture a fresh reference only after the user deliberately starts a reading.
         // This prevents a nearby field from being treated as the zero baseline.
         resetBaseline()
-        rawSamples.removeAll(keepingCapacity: true)
+        recordedSamples.removeAll(keepingCapacity: true)
         samples.removeAll(keepingCapacity: true)
         lastUIPublish = .distantPast
         observedDeliveryRateHz = nil
@@ -304,6 +304,13 @@ final class MagnetometerService: ObservableObject {
                 samples.removeAll(keepingCapacity: true)
                 latestSample = nil
                 lastUIPublish = .distantPast
+                if !baselineCaptured {
+                    // Do not mix pre-turn and post-turn samples into a baseline window.
+                    baselineVectors.removeAll(keepingCapacity: true)
+                    baselineSampleCount = 0
+                    baselineStartTimestamp = nil
+                    baselineStartWallClock = nil
+                }
             }
             return
         }
@@ -345,8 +352,8 @@ final class MagnetometerService: ObservableObject {
         )
 
         if isRunning {
-            rawSamples.append(sample)
-            if rawSamples.count > maximumStoredSamples {
+            recordedSamples.append(sample)
+            if recordedSamples.count > maximumStoredSamples {
                 rawSamples.removeFirst(max(1, maximumStoredSamples / 100))
             }
         }
@@ -410,11 +417,11 @@ final class MagnetometerService: ObservableObject {
     }
 
     func exportCSV() -> URL? {
-        guard !rawSamples.isEmpty else { return nil }
+        guard !recordedSamples.isEmpty else { return nil }
         let header = "timestamp_iso8601,calibrated_device_x_uT,calibrated_device_y_uT,calibrated_device_z_uT,calibrated_field_magnitude_uT,reference_vector_delta_uT,filtered_reference_vector_delta_uT,device_motion_calibration_quality"
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let body = rawSamples.map { $0.csvRow(using: formatter) }.joined(separator: "\n")
+        let body = recordedSamples.map { $0.csvRow(using: formatter) }.joined(separator: "\n")
         let contents = header + "\n" + body + "\n"
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("CurrentSense-\(Int(Date().timeIntervalSince1970)).csv")
