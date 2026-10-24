@@ -86,7 +86,7 @@ struct ContentView: View {
     private var referenceCurrentA = "1.0"
     @AppStorage("CurrentSense.calibration.acSensitivity")
     private var acSensitivityMicroteslaPerAmp = 0.0
-    @AppStorage("CurrentSense.calibration.dcSensitivity")
+    @AppStorage("CurrentSense.calibration.dcSensitivity.v2")
     private var dcSensitivityMicroteslaPerAmp = 0.0
 
     private var primaryTextColor: Color {
@@ -1013,7 +1013,7 @@ private struct CalculationSettingsView: View {
     private var referenceCurrentA = "1.0"
     @AppStorage("CurrentSense.calibration.acSensitivity")
     private var acSensitivityMicroteslaPerAmp = 0.0
-    @AppStorage("CurrentSense.calibration.dcSensitivity")
+    @AppStorage("CurrentSense.calibration.dcSensitivity.v2")
     private var dcSensitivityMicroteslaPerAmp = 0.0
 
     @State private var calibrationReferenceCurrentA = "1.0"
