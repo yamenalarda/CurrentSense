@@ -129,8 +129,15 @@ struct ContentView: View {
 
     private var measurementPanel: some View {
         Group {
-            if mode == .ac { acFieldScanPanel } else { measurementBar }
+            if mode == .ac {
+                acFieldScanPanel
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            } else {
+                measurementBar
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
         }
+        .id(mode)
     }
 
     private var acFieldScanPanel: some View {
@@ -555,8 +562,9 @@ struct ContentView: View {
         HStack(spacing: 5) {
             ForEach(MeasurementMode.allCases) { item in
                 Button {
-                    // Change the selected mode immediately; avoid a spring transition
-                    // competing with live Core Motion updates.
+                    // Switch immediately so sensor redraws cannot compete with the
+                    // mode change or leave the previous mode's panel on screen.
+                    guard mode != item else { return }
                     mode = item
                 } label: {
                     HStack(spacing: 9) {
@@ -568,6 +576,7 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity)
                     .contentShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                     .padding(.vertical, 14)
+                    .accessibilityIdentifier("mode-\(item.rawValue.lowercased())")
                     .foregroundStyle(mode == item ? .white :
                         (colorScheme == .dark ? .white.opacity(0.55) : .black.opacity(0.58)))
                     .background {
@@ -583,6 +592,8 @@ struct ContentView: View {
                     }
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("\(item.rawValue) measurement mode")
+                .accessibilityAddTraits(mode == item ? .isSelected : [])
             }
         }
         .contentShape(Capsule())
@@ -776,12 +787,12 @@ private struct FieldOrb: View {
                 Circle()
                     // Solid smoked-glass core: glossy and reflective, not see-through.
                     .fill(LinearGradient(colors: colorScheme == .dark
-                        ? [Color(red: 0.13, green: 0.16, blue: 0.22),
-                           Color(red: 0.035, green: 0.045, blue: 0.065),
-                           Color(red: 0.095, green: 0.075, blue: 0.14)]
-                        : [Color(red: 0.88, green: 0.93, blue: 0.97),
-                           Color(red: 0.70, green: 0.78, blue: 0.86),
-                           Color(red: 0.83, green: 0.82, blue: 0.93)],
+                        ? [Color(red: 0.17, green: 0.20, blue: 0.28),
+                           Color(red: 0.045, green: 0.055, blue: 0.085),
+                           Color(red: 0.12, green: 0.095, blue: 0.18)]
+                        : [Color(red: 0.94, green: 0.97, blue: 1.00),
+                           Color(red: 0.76, green: 0.84, blue: 0.93),
+                           Color(red: 0.87, green: 0.84, blue: 0.97)],
                         startPoint: .topLeading, endPoint: .bottomTrailing))
                     .overlay {
                         Circle().fill(
