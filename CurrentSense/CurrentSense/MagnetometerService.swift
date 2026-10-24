@@ -63,13 +63,7 @@ final class MagnetometerService: ObservableObject {
     private var baselineStartTimestamp: TimeInterval?
     private var baselineStartWallClock: Date?
     private var baselineSampleCount = 0
-    private var baselineSumX = 0.0
-    private var baselineSumY = 0.0
-    private var baselineSumZ = 0.0
-    private var baselineMagnitudeSamples: [Double] = []
-    private var baselineX: Double?
-    private var baselineY: Double?
-    private var baselineZ: Double?
+    private var baselineVectors: [MagneticFieldVector] = []
     private var anomalyDetector = MagneticAnomalyDetector()
 
     init() {
@@ -111,14 +105,14 @@ final class MagnetometerService: ObservableObject {
         lastUIPublish = .distantPast
         observedDeliveryRateHz = nil
         isRunning = true
-        restartMotionUpdates(interval: measurementUpdateInterval)
+        setMotionUpdateInterval(measurementUpdateInterval)
     }
 
     /// Ends the measurement, but leaves low-rate monitoring active for the idle orb.
     func stop() {
         guard isRunning else { return }
         isRunning = false
-        restartMotionUpdates(interval: standbyUpdateInterval)
+        setMotionUpdateInterval(standbyUpdateInterval)
         if let latestSample, samples.last?.id != latestSample.id {
             samples.append(latestSample)
             if samples.count > maximumChartSamples {
@@ -127,14 +121,13 @@ final class MagnetometerService: ObservableObject {
         }
     }
 
-    /// Apply rate changes by restarting Core Motion, while retaining the baseline.
-    private func restartMotionUpdates(interval: TimeInterval) {
+    /// Update the target sample interval without restarting Core Motion.
+    /// Keeping the same session preserves its attitude reference frame for vector comparisons.
+    private func setMotionUpdateInterval(_ interval: TimeInterval) {
         guard isMonitoring else { return }
-        motionManager.stopDeviceMotionUpdates()
         motionManager.deviceMotionUpdateInterval = interval
         lastDeliveryTimestamp = nil
         smoothedDeliveryRateHz = nil
-        startMotionUpdates()
     }
 
     /// Stops sensor use when the screen goes away.
@@ -152,13 +145,7 @@ final class MagnetometerService: ObservableObject {
         baselineStartTimestamp = nil
         baselineStartWallClock = nil
         baselineSampleCount = 0
-        baselineSumX = 0
-        baselineSumY = 0
-        baselineSumZ = 0
-        baselineMagnitudeSamples.removeAll(keepingCapacity: true)
-        baselineX = nil
-        baselineY = nil
-        baselineZ = nil
+        baselineVectors.removeAll(keepingCapacity: true)
         anomalyDetector.reset()
         magneticSourceDetected = false
         latestSample = nil
@@ -186,6 +173,17 @@ final class MagnetometerService: ObservableObject {
             let y = field.y
             let z = field.z
             guard x.isFinite, y.isFinite, z.isFinite else { return }
+
+            // Magnetic field is reported in device coordinates. Rotate it into the
+            // persistent Core Motion reference frame so a phone rotation is less likely
+            // to look like a magnetic-source change.
+            let rotation = motion.attitude.rotationMatrix
+            let referenceVector = MagneticFieldVector(
+                x: x * rotation.m11 + y * rotation.m12 + z * rotation.m13,
+                y: x * rotation.m21 + y * rotation.m22 + z * rotation.m23,
+                z: x * rotation.m31 + y * rotation.m32 + z * rotation.m33
+            )
+            guard referenceVector.isFinite else { return }
 
             let deliveryTimestamp = motion.timestamp
             let deliveryWallClock = Date()
@@ -220,17 +218,13 @@ final class MagnetometerService: ObservableObject {
 
                 let magnitude = sqrt(x * x + y * y + z * z)
                 self.updateBaselineIfNeeded(
-                    x: x, y: y, z: z, magnitude: magnitude,
+                    vector: referenceVector,
                     timestamp: deliveryTimestamp
                 )
-                self.updateMagneticSourceDetection(magnitude: magnitude)
+                self.updateMagneticSourceDetection(vector: referenceVector)
 
-                var deltaMagnitude: Double?
-                if let bx = self.baselineX, let by = self.baselineY, let bz = self.baselineZ {
-                    let dx = x - bx
-                    let dy = y - by
-                    let dz = z - bz
-                    deltaMagnitude = sqrt(dx * dx + dy * dy + dz * dz)
+                let deltaMagnitude = self.anomalyDetector.baselineVector.map {
+                    referenceVector.distance(to: $0)
                 }
 
                 let sample = MagneticSample(
@@ -280,7 +274,7 @@ final class MagnetometerService: ObservableObject {
     }
 
     private func updateBaselineIfNeeded(
-        x: Double, y: Double, z: Double, magnitude: Double,
+        vector: MagneticFieldVector,
         timestamp: TimeInterval
     ) {
         guard !baselineCaptured else { return }
@@ -288,27 +282,21 @@ final class MagnetometerService: ObservableObject {
             baselineStartTimestamp = timestamp
         }
 
-        baselineSumX += x
-        baselineSumY += y
-        baselineSumZ += z
-        baselineMagnitudeSamples.append(magnitude)
+        baselineVectors.append(vector)
         baselineSampleCount += 1
 
         let elapsed = timestamp - (baselineStartTimestamp ?? timestamp)
         guard elapsed >= baselineCaptureDuration,
               baselineSampleCount >= minimumBaselineSamples else { return }
 
-        let count = Double(baselineSampleCount)
-        baselineX = baselineSumX / count
-        baselineY = baselineSumY / count
-        baselineZ = baselineSumZ / count
-        anomalyDetector.setBaseline(from: baselineMagnitudeSamples)
+        anomalyDetector.setBaseline(from: baselineVectors)
         baselineCaptured = anomalyDetector.hasBaseline
+        baselineVectors.removeAll(keepingCapacity: true)
     }
 
-    private func updateMagneticSourceDetection(magnitude: Double) {
+    private func updateMagneticSourceDetection(vector: MagneticFieldVector) {
         // This signals a sustained field change only, not cable contact or current.
-        magneticSourceDetected = anomalyDetector.update(magnitude: magnitude)
+        magneticSourceDetected = anomalyDetector.update(vector: vector)
     }
 
     func clearSamples() {
@@ -324,7 +312,7 @@ final class MagnetometerService: ObservableObject {
 
     func exportCSV() -> URL? {
         guard !rawSamples.isEmpty else { return nil }
-        let header = "timestamp_iso8601,x_uT,y_uT,z_uT,total_magnitude_uT,delta_from_baseline_uT,calibration_quality"
+        let header = "timestamp_iso8601,device_x_uT,device_y_uT,device_z_uT,total_magnitude_uT,reference_vector_delta_uT,calibration_quality"
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let body = rawSamples.map { $0.csvRow(using: formatter) }.joined(separator: "\n")
