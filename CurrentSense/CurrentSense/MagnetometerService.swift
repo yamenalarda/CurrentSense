@@ -31,6 +31,7 @@ final class MagnetometerService: ObservableObject {
     @Published private(set) var errorMessage: String?
     @Published private(set) var observedDeliveryRateHz: Double?
     @Published private(set) var baselineCaptured = false
+    @Published private(set) var calibrationQuality = "Unknown"
 
     private let motionManager = CMMotionManager()
     private let queue: OperationQueue = {
@@ -78,6 +79,7 @@ final class MagnetometerService: ObservableObject {
         lastDeliveryTimestamp = nil
         observedDeliveryRateHz = nil
         baselineCaptured = false
+        calibrationQuality = "Unknown"
         baselineStartTimestamp = nil
         baselineSampleCount = 0
         baselineSumX = 0
@@ -109,9 +111,18 @@ final class MagnetometerService: ObservableObject {
             let z = field.z
             guard x.isFinite, y.isFinite, z.isFinite else { return }
             let deliveryTimestamp = motion.timestamp
+            let calibrationQuality: String
+            switch motion.magneticField.accuracy {
+            case .high: calibrationQuality = "High"
+            case .medium: calibrationQuality = "Medium"
+            case .low: calibrationQuality = "Low"
+            case .uncalibrated: calibrationQuality = "Uncalibrated"
+            @unknown default: calibrationQuality = "Unknown"
+            }
 
             Task { @MainActor in
                 guard let self, self.isRunning else { return }
+                self.calibrationQuality = calibrationQuality
 
                 if self.baselineStartTimestamp == nil {
                     self.baselineStartTimestamp = deliveryTimestamp
@@ -203,6 +214,7 @@ final class MagnetometerService: ObservableObject {
         lastDeliveryTimestamp = nil
         observedDeliveryRateHz = nil
         baselineCaptured = false
+        calibrationQuality = "Unknown"
         baselineStartTimestamp = nil
         baselineSampleCount = 0
         baselineSumX = 0
