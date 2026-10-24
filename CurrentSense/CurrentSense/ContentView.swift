@@ -3,614 +3,404 @@ import Charts
 import UIKit
 
 private enum MeasurementMode: String, CaseIterable, Identifiable {
-    case dc = "DC"
     case ac = "AC"
+    case dc = "DC"
     var id: String { rawValue }
 }
 
-private enum GlassStyle {
+private enum FieldPalette {
     static let background = LinearGradient(
-        colors: [Color(red: 0.035, green: 0.055, blue: 0.10),
-                 Color(red: 0.075, green: 0.10, blue: 0.17),
-                 Color(red: 0.025, green: 0.035, blue: 0.07)],
+        colors: [Color(red: 0.018, green: 0.035, blue: 0.075),
+                 Color(red: 0.035, green: 0.055, blue: 0.12),
+                 Color(red: 0.012, green: 0.02, blue: 0.05)],
         startPoint: .topLeading, endPoint: .bottomTrailing
     )
-    static let cyan = Color(red: 0.38, green: 0.82, blue: 1.0)
-    static let mint = Color(red: 0.40, green: 0.94, blue: 0.76)
+
+    // Simulation-style heat map: low field = blue, high field = red.
+    static func color(for magnitude: Double) -> Color {
+        let t = min(max(magnitude / 250.0, 0), 1)
+        let stops: [(Double, Color)] = [
+            (0.00, Color(red: 0.02, green: 0.16, blue: 0.95)),
+            (0.20, Color(red: 0.0, green: 0.72, blue: 1.0)),
+            (0.40, Color(red: 0.05, green: 0.92, blue: 0.55)),
+            (0.60, Color(red: 1.0, green: 0.90, blue: 0.05)),
+            (0.80, Color(red: 1.0, green: 0.38, blue: 0.04)),
+            (1.00, Color(red: 1.0, green: 0.04, blue: 0.12))
+        ]
+        for index in 0..<(stops.count - 1) {
+            let (a, ca) = stops[index]
+            let (b, cb) = stops[index + 1]
+            if t >= a && t <= b {
+                let u = (t - a) / (b - a)
+                return Color(
+                    red: ca.components.red + (cb.components.red - ca.components.red) * u,
+                    green: ca.components.green + (cb.components.green - ca.components.green) * u,
+                    blue: ca.components.blue + (cb.components.blue - ca.components.blue) * u
+                )
+            }
+        }
+        return stops.last!.1
+    }
+}
+
+private extension Color {
+    var components: (red: Double, green: Double, blue: Double) {
+        let ui = UIColor(self)
+        var r: CGFloat = 0
+        var g: CGFloat = 0
+        var b: CGFloat = 0
+        var a: CGFloat = 0
+        ui.getRed(&r, green: &g, blue: &b, alpha: &a)
+        return (Double(r), Double(g), Double(b))
+    }
 }
 
 struct ContentView: View {
     @StateObject private var sensor = MagnetometerService()
-    @State private var mode: MeasurementMode = .dc
-    @State private var baseline: SIMD3<Double>?
-    @State private var distanceMillimeters = 5.0
+    @State private var mode: MeasurementMode = .ac
     @State private var showShareSheet = false
     @State private var exportURL: URL?
-    @State private var showBaselineConfirmation = false
 
-    private var currentVector: SIMD3<Double>? {
-        guard let sample = sensor.latestSample else { return nil }
-        return SIMD3(sample.x, sample.y, sample.z)
-    }
-
-    private var deltaVector: SIMD3<Double>? {
-        guard let currentVector, let baseline else { return nil }
-        return currentVector - baseline
-    }
-
-    private var deltaMagnitudeMicrotesla: Double? {
-        guard let v = deltaVector else { return nil }
-        return sqrt(v.x * v.x + v.y * v.y + v.z * v.z)
-    }
-
-    // Ideal long straight wire only; not a calibrated current measurement.
-    private var estimatedDCCurrent: Double? {
-        guard mode == .dc, let deltaMagnitudeMicrotesla else { return nil }
-        let r = distanceMillimeters / 1000
-        let b = deltaMagnitudeMicrotesla * 1e-6
-        let mu0 = 4 * Double.pi * 1e-7
-        return 2 * Double.pi * r * b / mu0
-    }
-
-    private var observedSampleRate: Double? {
-        sensor.observedDeliveryRateHz
-    }
+    private var fieldMagnitude: Double? { sensor.latestSample?.magnitude }
+    private var fieldColor: Color { FieldPalette.color(for: fieldMagnitude ?? 0) }
 
     var body: some View {
-        NavigationStack {
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 16) {
-                    header
-                    statusCard
+        GeometryReader { geometry in
+            ZStack {
+                FieldPalette.background.ignoresSafeArea()
+                ambientGlow
+                VStack(spacing: 0) {
+                    topControls
+                        .padding(.top, 8)
+
                     modePicker
-                    fieldCard
-                    chartCard
-                    baselineCard
-                    if mode == .dc { dcEstimatorCard } else { acDiagnosticsCard }
-                    sessionCard
-                    safetyNote
-                    Text("Designed by Yamen Arada")
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.35))
-                        .padding(.top, 2)
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
-                .padding(.bottom, 28)
-            }
-            .background { GlassStyle.background.ignoresSafeArea() }
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        guard let url = sensor.exportCSV() else { return }
-                        exportURL = url
-                        showShareSheet = true
-                    } label: {
-                        Image(systemName: "square.and.arrow.up")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 38, height: 38)
-                            .background(.ultraThinMaterial, in: Circle())
-                            .overlay(Circle().stroke(.white.opacity(0.12), lineWidth: 1))
+                        .padding(.top, 24)
+                        .padding(.horizontal, 34)
+
+                    Spacer(minLength: 12)
+
+                    FieldOrb(isMeasuring: sensor.isRunning,
+                             magnitude: fieldMagnitude ?? 0,
+                             tint: fieldColor)
+                        .frame(width: min(geometry.size.width * 0.86, geometry.size.height * 0.48),
+                               height: min(geometry.size.width * 0.86, geometry.size.height * 0.48))
+                        .contentShape(Circle())
+                        .onTapGesture { toggleMeasurement() }
+                        .accessibilityElement()
+                        .accessibilityLabel(sensor.isRunning ? "Stop measurement" : "Start measurement")
+                        .accessibilityHint("Tap the glass sphere to start or stop measuring.")
+                        .accessibilityAddTraits(.isButton)
+                        .padding(.top, 4)
+
+                    VStack(spacing: 8) {
+                        Text(sensor.isRunning ? "Tap the circle to stop measuring" : "Tap the circle to start measuring")
+                            .font(.system(size: 17, weight: .medium, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.94))
+                            .contentTransition(.opacity)
+                        Text("Place the back of your iPhone near the insulated cable")
+                            .font(.system(size: 13, weight: .regular, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.62))
+                            .multilineTextAlignment(.center)
+                        if let error = sensor.errorMessage {
+                            Text(error)
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                                .multilineTextAlignment(.center)
+                        }
+                        if sensor.isRunning {
+                            HStack(spacing: 6) {
+                                Circle().fill(fieldColor).frame(width: 6, height: 6)
+                                Text("LIVE FIELD")
+                                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                                    .tracking(1.6)
+                                    .foregroundStyle(fieldColor)
+                            }
+                            .padding(.top, 2)
+                        }
                     }
-                    .disabled(sensor.samples.isEmpty)
-                    .accessibilityLabel("Export CSV")
+                    .padding(.horizontal, 28)
+                    .padding(.top, 20)
+
+                    Spacer(minLength: 16)
+
+                    measurementBar
+                        .padding(.horizontal, 18)
+                        .padding(.bottom, max(geometry.safeAreaInsets.bottom == 0 ? 14 : 8, 8))
                 }
+                .padding(.horizontal, 8)
             }
-            .toolbarBackground(.hidden, for: .navigationBar)
-            .sheet(isPresented: $showShareSheet) {
-                if let exportURL { ShareSheet(items: [exportURL]) }
-            }
-            .alert("Baseline captured", isPresented: $showBaselineConfirmation) {
-                Button("OK", role: .cancel) { }
-            } message: {
-                Text("Baseline averaged from recent samples. Keep the phone in the same position and orientation.")
-            }
-            .onDisappear { sensor.stop() }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .preferredColorScheme(.dark)
-        .tint(GlassStyle.cyan)
-        .animation(.snappy(duration: 0.28), value: sensor.isRunning)
-        .animation(.snappy(duration: 0.28), value: mode)
+        .tint(.white)
+        .animation(.spring(response: 0.42, dampingFraction: 0.78), value: sensor.isRunning)
+        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: mode)
+        .animation(.spring(response: 0.45, dampingFraction: 0.76), value: fieldMagnitude)
+        .sheet(isPresented: $showShareSheet) {
+            if let exportURL { ShareSheet(items: [exportURL]) }
+        }
+        .onDisappear { sensor.stop() }
     }
 
-    private var header: some View {
-        HStack(spacing: 12) {
+    private var ambientGlow: some View {
+        GeometryReader { proxy in
             ZStack {
-                RoundedRectangle(cornerRadius: 17, style: .continuous)
-                    .fill(LinearGradient(colors: [GlassStyle.cyan.opacity(0.95), Color.blue.opacity(0.7)],
-                                         startPoint: .topLeading, endPoint: .bottomTrailing))
-                Image(systemName: "waveform.path.ecg")
-                    .font(.system(size: 24, weight: .medium))
-                    .foregroundStyle(.white)
-                    .symbolRenderingMode(.hierarchical)
+                Circle()
+                    .fill(fieldColor.opacity(sensor.isRunning ? 0.17 : 0.08))
+                    .frame(width: proxy.size.width * 0.95)
+                    .blur(radius: 100)
+                    .offset(x: -proxy.size.width * 0.25, y: -proxy.size.height * 0.08)
+                Circle()
+                    .fill(Color.blue.opacity(0.12))
+                    .frame(width: proxy.size.width * 0.7)
+                    .blur(radius: 90)
+                    .offset(x: proxy.size.width * 0.35, y: proxy.size.height * 0.3)
             }
-            .frame(width: 54, height: 54)
-            .shadow(color: GlassStyle.cyan.opacity(0.22), radius: 18, y: 5)
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text("CurrentSense")
-                    .font(.system(size: 26, weight: .bold, design: .rounded))
-                    .tracking(-0.7)
-                    .foregroundStyle(.white)
-                Text("MAGNETIC FIELD LAB")
-                    .font(.system(size: 10, weight: .bold, design: .rounded))
-                    .tracking(2.1)
-                    .foregroundStyle(.white.opacity(0.52))
-            }
-            Spacer()
-            Image(systemName: "sensor.tag.radiowaves.forward")
-                .font(.system(size: 20, weight: .medium))
-                .foregroundStyle(GlassStyle.mint)
-                .symbolEffect(.pulse, isActive: sensor.isRunning)
-                .padding(11)
-                .background(.ultraThinMaterial, in: Circle())
-                .overlay(Circle().stroke(.white.opacity(0.12), lineWidth: 1))
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .allowsHitTesting(false)
         }
-        .padding(.vertical, 8)
-        .accessibilityElement(children: .combine)
+        .ignoresSafeArea()
+        .animation(.easeInOut(duration: 0.6), value: fieldColor)
     }
 
-    private var statusCard: some View {
-        GlassCard {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(spacing: 9) {
-                    Circle()
-                        .fill(sensor.isRunning ? GlassStyle.mint : Color.white.opacity(0.35))
-                        .frame(width: 8, height: 8)
-                        .shadow(color: sensor.isRunning ? GlassStyle.mint.opacity(0.8) : .clear, radius: 7)
-                    Text(sensor.isRunning ? "Live sensor" : "Sensor paused")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white)
-                    Spacer()
-                    Text(sensor.isAvailable ? "READY" : "UNAVAILABLE")
-                        .font(.system(size: 10, weight: .bold, design: .rounded))
-                        .tracking(1)
-                        .foregroundStyle(sensor.isAvailable ? GlassStyle.mint : .orange)
-                }
-
-                HStack(spacing: 10) {
-                    Button {
-                        if sensor.isRunning {
-                            withAnimation(.snappy) { sensor.stop() }
-                        } else {
-                            withAnimation(.snappy) { sensor.start() }
-                        }
-                    } label: {
-                        Label(sensor.isRunning ? "Pause" : "Start measuring",
-                              systemImage: sensor.isRunning ? "pause.fill" : "play.fill")
-                            .font(.subheadline.weight(.semibold))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
-                            .foregroundStyle(Color(red: 0.02, green: 0.08, blue: 0.13))
-                            .background(LinearGradient(colors: [GlassStyle.cyan, GlassStyle.mint],
-                                                       startPoint: .leading, endPoint: .trailing),
-                                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    }
-                    .buttonStyle(PressScaleStyle())
-                    .disabled(!sensor.isAvailable)
-
-                    Button {
-                        withAnimation(.snappy) {
-                            sensor.clearSamples()
-                            baseline = nil
-                        }
-                    } label: {
-                        Image(systemName: "arrow.counterclockwise")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.9))
-                            .frame(width: 46, height: 44)
-                            .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
-                            .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.1)))
-                    }
-                    .buttonStyle(PressScaleStyle())
-                    .disabled(sensor.isRunning)
-                    .accessibilityLabel("Clear samples")
-                }
-
-                if let error = sensor.errorMessage {
-                    Label(error, systemImage: "exclamationmark.triangle.fill")
-                        .font(.footnote)
-                        .foregroundStyle(.orange)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+    private var topControls: some View {
+        HStack {
+            Spacer()
+            Button {
+                guard let url = sensor.exportCSV() else { return }
+                exportURL = url
+                showShareSheet = true
+            } label: {
+                Image(systemName: "square.and.arrow.up")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.9))
+                    .frame(width: 42, height: 42)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .overlay(Circle().stroke(.white.opacity(0.16), lineWidth: 1))
             }
+            .disabled(sensor.samples.isEmpty)
+            .accessibilityLabel("Export measurements as CSV")
         }
+        .padding(.horizontal, 20)
     }
 
     private var modePicker: some View {
         HStack(spacing: 5) {
             ForEach(MeasurementMode.allCases) { item in
                 Button {
-                    withAnimation(.snappy(duration: 0.25)) { mode = item }
-                } label: {
-                    HStack(spacing: 7) {
-                        Image(systemName: item == .dc ? "arrow.right" : "waveform")
-                        Text(item.rawValue)
+                    withAnimation(.spring(response: 0.34, dampingFraction: 0.72)) {
+                        mode = item
                     }
-                    .font(.subheadline.weight(.semibold))
+                } label: {
+                    HStack(spacing: 9) {
+                        Image(systemName: item == .ac ? "waveform" : "arrow.right")
+                            .font(.system(size: 17, weight: .semibold))
+                        Text(item.rawValue)
+                            .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    }
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
+                    .padding(.vertical, 14)
                     .foregroundStyle(mode == item ? .white : .white.opacity(0.55))
                     .background {
                         if mode == item {
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .fill(.white.opacity(0.13))
-                                .overlay(RoundedRectangle(cornerRadius: 12).stroke(.white.opacity(0.16)))
+                            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                                .fill(LinearGradient(
+                                    colors: [fieldColor.opacity(0.62), fieldColor.opacity(0.22)],
+                                    startPoint: .topLeading, endPoint: .bottomTrailing
+                                ))
+                                .overlay(RoundedRectangle(cornerRadius: 24).stroke(.white.opacity(0.28)))
+                                .shadow(color: fieldColor.opacity(0.22), radius: 12, y: 3)
                         }
                     }
                 }
-                .buttonStyle(PressScaleStyle())
+                .buttonStyle(OrbPressStyle())
             }
         }
         .padding(5)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.1), lineWidth: 1))
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().stroke(.white.opacity(0.18), lineWidth: 1))
     }
 
-    private var fieldCard: some View {
-        GlassCard {
-            VStack(alignment: .leading, spacing: 17) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("TOTAL FIELD")
-                            .font(.system(size: 10, weight: .bold, design: .rounded))
-                            .tracking(1.8)
-                            .foregroundStyle(.white.opacity(0.5))
-                        HStack(alignment: .firstTextBaseline, spacing: 7) {
-                            Text(sensor.latestSample.map { String(format: "%.2f", $0.magnitude) } ?? "—")
-                                .font(.system(size: 43, weight: .medium, design: .rounded))
-                                .monospacedDigit()
-                                .contentTransition(.numericText())
-                                .minimumScaleFactor(0.65)
-                                .lineLimit(1)
-                            Text("µT")
-                                .font(.title3.weight(.medium))
-                                .foregroundStyle(GlassStyle.cyan)
-                        }
-                        .foregroundStyle(.white)
-                    }
-                    Spacer(minLength: 0)
-                    Image(systemName: "dot.radiowaves.left.and.right")
-                        .font(.system(size: 28, weight: .light))
-                        .foregroundStyle(GlassStyle.cyan.opacity(0.9))
-                        .frame(width: 60, height: 60)
-                        .background(GlassStyle.cyan.opacity(0.09), in: Circle())
-                        .overlay(Circle().stroke(GlassStyle.cyan.opacity(0.2)))
-                }
-
-                Rectangle().fill(.white.opacity(0.09)).frame(height: 1)
-
-                HStack(spacing: 8) {
-                    axisTile("X", value: sensor.latestSample?.x, tint: Color(red: 1, green: 0.43, blue: 0.48))
-                    axisTile("Y", value: sensor.latestSample?.y, tint: GlassStyle.mint)
-                    axisTile("Z", value: sensor.latestSample?.z, tint: GlassStyle.cyan)
-                }
-
-                HStack(spacing: 8) {
-                    Image(systemName: "arrow.left.arrow.right")
-                        .foregroundStyle(GlassStyle.cyan)
-                    if let delta = deltaMagnitudeMicrotesla {
-                        Text("Δ Baseline")
-                            .foregroundStyle(.white.opacity(0.6))
-                        Spacer()
-                        Text(String(format: "%.3f µT", delta))
-                            .font(.system(.subheadline, design: .monospaced).weight(.semibold))
-                            .contentTransition(.numericText())
-                            .foregroundStyle(.white)
-                    } else {
-                        Text("Capture a baseline to compare field changes")
-                            .foregroundStyle(.white.opacity(0.55))
-                            .font(.footnote)
-                    }
-                }
-                .font(.subheadline)
-            }
+    private var measurementBar: some View {
+        HStack(spacing: 0) {
+            metricColumn(title: "CURRENT", value: "—", unit: "A",
+                         detail: mode == .ac ? "AC • 50 Hz" : "DC",
+                         tint: fieldColor)
+            separator
+            metricColumn(title: "MAGNETIC FIELD",
+                         value: fieldMagnitude.map { String(format: "%.1f", $0) } ?? "—",
+                         unit: "µT",
+                         detail: sensor.isRunning ? "Live reading" : "Tap sphere to begin",
+                         tint: fieldColor)
+            separator
+            metricColumn(title: "DISTANCE", value: "—", unit: "cm",
+                         detail: "Not measured",
+                         tint: .white.opacity(0.65))
         }
+        .padding(.vertical, 16)
+        .padding(.horizontal, 8)
+        .background {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .fill(LinearGradient(colors: [.white.opacity(0.10), .white.opacity(0.015)],
+                                             startPoint: .topLeading, endPoint: .bottomTrailing)
+                        )
+                }
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(LinearGradient(colors: [.white.opacity(0.26), .white.opacity(0.06)],
+                                       startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
+        }
+        .shadow(color: fieldColor.opacity(0.12), radius: 22, y: 8)
     }
 
-    private func axisTile(_ axis: String, value: Double?, tint: Color) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 5) {
-                Circle().fill(tint).frame(width: 6, height: 6)
-                Text(axis)
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.white.opacity(0.7))
-            }
-            Text(value.map { String(format: "%+.2f", $0) } ?? "—")
-                .font(.system(size: 16, weight: .medium, design: .rounded).monospacedDigit())
-                .foregroundStyle(.white)
-                .minimumScaleFactor(0.7)
+    private var separator: some View {
+        Rectangle()
+            .fill(.white.opacity(0.12))
+            .frame(width: 1, height: 54)
+    }
+
+    private func metricColumn(title: String, value: String, unit: String,
+                              detail: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(title)
+                .font(.system(size: 9, weight: .bold, design: .rounded))
+                .tracking(0.8)
+                .foregroundStyle(.white.opacity(0.58))
                 .lineLimit(1)
-            Text("µT")
-                .font(.caption2)
-                .foregroundStyle(.white.opacity(0.4))
+                .minimumScaleFactor(0.7)
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                Text(value)
+                    .font(.system(size: 23, weight: .medium, design: .rounded))
+                    .monospacedDigit()
+                    .contentTransition(.numericText())
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                Text(unit)
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.76))
+            }
+            Text(detail)
+                .font(.system(size: 9, weight: .medium, design: .rounded))
+                .foregroundStyle(tint)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(11)
-        .background(.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 13).stroke(tint.opacity(0.18), lineWidth: 1))
+        .padding(.horizontal, 8)
     }
 
-    private var chartCard: some View {
-        GlassCard {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Field history")
-                            .font(.headline)
-                            .foregroundStyle(.white)
-                        Text("Magnetic magnitude over time")
-                            .font(.caption)
-                            .foregroundStyle(.white.opacity(0.48))
-                    }
-                    Spacer()
-                    Text("\(sensor.samples.count)")
-                        .font(.system(.caption, design: .monospaced).weight(.semibold))
-                        .foregroundStyle(GlassStyle.cyan)
-                        .padding(.horizontal, 9).padding(.vertical, 6)
-                        .background(GlassStyle.cyan.opacity(0.1), in: Capsule())
-                }
-
-                if chartSamples.count >= 2 {
-                    Chart {
-                        ForEach(chartSamples) { sample in
-                            AreaMark(x: .value("Time", sample.timestamp),
-                                     yStart: .value("Floor", chartFloor),
-                                     yEnd: .value("Field", sample.magnitude))
-                                .foregroundStyle(LinearGradient(colors: [GlassStyle.cyan.opacity(0.22), GlassStyle.cyan.opacity(0.01)],
-                                                                startPoint: .top, endPoint: .bottom))
-                                .interpolationMethod(.catmullRom)
-                            LineMark(x: .value("Time", sample.timestamp),
-                                     y: .value("Field (µT)", sample.magnitude))
-                                .foregroundStyle(GlassStyle.cyan)
-                                .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
-                                .interpolationMethod(.catmullRom)
-                        }
-                    }
-                    .chartYScale(domain: chartFloor...chartCeiling)
-                    .chartYAxis {
-                        AxisMarks(position: .leading, values: .automatic(desiredCount: 4)) { value in
-                            AxisGridLine().foregroundStyle(.white.opacity(0.08))
-                            AxisValueLabel().foregroundStyle(.white.opacity(0.45))
-                        }
-                    }
-                    .chartXAxis {
-                        AxisMarks(values: .automatic(desiredCount: 4)) {
-                            AxisGridLine().foregroundStyle(.white.opacity(0.04))
-                            AxisValueLabel().foregroundStyle(.white.opacity(0.4))
-                        }
-                    }
-                    .chartPlotStyle { plot in
-                        plot.clipped()
-                    }
-                    .frame(height: 190)
-                    .animation(.easeInOut(duration: 0.25), value: chartSamples.last?.id)
-                } else {
-                    VStack(spacing: 10) {
-                        Image(systemName: "waveform.path")
-                            .font(.system(size: 27, weight: .light))
-                            .foregroundStyle(GlassStyle.cyan.opacity(0.75))
-                        Text("Waiting for measurements")
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(.white.opacity(0.75))
-                        Text("Start measuring to build a live trace.")
-                            .font(.caption)
-                            .foregroundStyle(.white.opacity(0.4))
-                    }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 160)
-                }
+    private func toggleMeasurement() {
+        withAnimation(.spring(response: 0.42, dampingFraction: 0.72)) {
+            if sensor.isRunning {
+                sensor.stop()
+            } else {
+                sensor.start()
             }
-        }
-    }
-
-    private var chartFloor: Double {
-        let minValue = chartSamples.map(\.magnitude).min() ?? 0
-        let maxValue = chartSamples.map(\.magnitude).max() ?? 1
-        let padding = max((maxValue - minValue) * 0.18, 0.5)
-        return max(0, minValue - padding)
-    }
-
-    private var chartCeiling: Double {
-        let minValue = chartSamples.map(\.magnitude).min() ?? 0
-        let maxValue = chartSamples.map(\.magnitude).max() ?? 1
-        return maxValue + max((maxValue - minValue) * 0.18, 0.5)
-    }
-
-    private var chartSamples: [MagneticSample] {
-        let all = sensor.samples
-        guard all.count > 500 else { return all }
-        let step = max(1, all.count / 500)
-        return Array(all.enumerated().compactMap { index, sample in
-            index.isMultiple(of: step) ? sample : nil
-        })
-    }
-
-    private var baselineCard: some View {
-        GlassCard {
-            VStack(alignment: .leading, spacing: 12) {
-                sectionHeader("Baseline", subtitle: "Reference field for change detection", icon: "scope")
-                Text(baseline == nil
-                     ? "Place the phone in a fixed position with the test current switched off. Capture several samples for a steadier reference."
-                     : "Reference saved. Keep the phone position and orientation unchanged while comparing measurements.")
-                    .font(.footnote)
-                    .foregroundStyle(.white.opacity(0.58))
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Button {
-                    guard sensor.isRunning, !sensor.samples.isEmpty else { return }
-                    let recent = Array(sensor.samples.suffix(20))
-                    let count = Double(recent.count)
-                    baseline = SIMD3(
-                        recent.reduce(0) { $0 + $1.x } / count,
-                        recent.reduce(0) { $0 + $1.y } / count,
-                        recent.reduce(0) { $0 + $1.z } / count
-                    )
-                    showBaselineConfirmation = true
-                } label: {
-                    Label(baseline == nil ? "Capture averaged baseline" : "Recapture baseline",
-                          systemImage: "scope")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 13))
-                        .overlay(RoundedRectangle(cornerRadius: 13).stroke(.white.opacity(0.12)))
-                }
-                .buttonStyle(PressScaleStyle())
-                .disabled(!sensor.isRunning || sensor.samples.isEmpty)
-            }
-        }
-    }
-
-    private var dcEstimatorCard: some View {
-        GlassCard {
-            VStack(alignment: .leading, spacing: 12) {
-                sectionHeader("DC experiment", subtitle: "Theoretical estimate only", icon: "arrow.right")
-                Text("Uses the ideal long, straight-wire equation. Real wiring geometry and phone sensor position can make this estimate substantially wrong.")
-                    .font(.footnote)
-                    .foregroundStyle(.white.opacity(0.58))
-
-                HStack {
-                    Text("Sensor-to-wire distance")
-                        .font(.subheadline)
-                        .foregroundStyle(.white.opacity(0.8))
-                    Spacer()
-                    Text(String(format: "%.1f mm", distanceMillimeters))
-                        .font(.system(.subheadline, design: .monospaced).weight(.semibold))
-                        .foregroundStyle(GlassStyle.cyan)
-                }
-                Slider(value: $distanceMillimeters, in: 2...30, step: 0.5)
-                    .tint(GlassStyle.cyan)
-
-                HStack(alignment: .firstTextBaseline, spacing: 7) {
-                    Text(estimatedDCCurrent.map { String(format: "%.3f", $0) } ?? "—")
-                        .font(.system(size: 31, weight: .medium, design: .rounded))
-                        .monospacedDigit()
-                        .contentTransition(.numericText())
-                        .foregroundStyle(.white)
-                    Text("A theoretical")
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.5))
-                }
-                Text("Do not treat this estimate as a calibrated ammeter reading.")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.orange.opacity(0.9))
-            }
-        }
-    }
-
-    private var acDiagnosticsCard: some View {
-        GlassCard {
-            VStack(alignment: .leading, spacing: 12) {
-                sectionHeader("AC diagnostics", subtitle: "Sampling check, not an AC meter", icon: "waveform")
-                metricRow("Observed app update rate", value: observedSampleRate.map { String(format: "%.2f Hz", $0) } ?? "—")
-                metricRow("Mains frequency reference", value: "50 / 60 Hz")
-                Text("The requested update interval is not a guarantee of hardware sample rate. Core Motion may filter or average the field, so this screen cannot establish AC waveform amplitude or RMS current.")
-                    .font(.footnote)
-                    .foregroundStyle(.white.opacity(0.58))
-            }
-        }
-    }
-
-    private var sessionCard: some View {
-        GlassCard {
-            VStack(alignment: .leading, spacing: 11) {
-                sectionHeader("Session", subtitle: "Data captured by this app", icon: "clock")
-                metricRow("Elapsed time", value: elapsedText)
-                metricRow("Stored samples", value: "\(sensor.samples.count)")
-                metricRow("CSV export", value: sensor.samples.isEmpty ? "No data yet" : "Ready")
-                Text("CSV timestamps record when the app receives updates; they do not guarantee the exact hardware sampling instant.")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.42))
-            }
-        }
-    }
-
-    private var elapsedText: String {
-        guard let first = sensor.samples.first, let last = sensor.samples.last else { return "—" }
-        return String(format: "%.1f s", last.timestamp.timeIntervalSince(first.timestamp))
-    }
-
-    private var safetyNote: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
-                .padding(.top, 2)
-            Text("Research use only. Test with isolated, low-voltage, current-limited circuits. Never use this app to determine whether mains wiring is safe.")
-                .font(.footnote)
-                .foregroundStyle(.white.opacity(0.7))
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.orange.opacity(0.07), in: RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(.orange.opacity(0.15), lineWidth: 1))
-    }
-
-    private func sectionHeader(_ title: String, subtitle: String, icon: String) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: icon)
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(GlassStyle.cyan)
-                .frame(width: 35, height: 35)
-                .background(GlassStyle.cyan.opacity(0.1), in: RoundedRectangle(cornerRadius: 11))
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.headline).foregroundStyle(.white)
-                Text(subtitle).font(.caption).foregroundStyle(.white.opacity(0.45))
-            }
-            Spacer()
-        }
-    }
-
-    private func metricRow(_ title: String, value: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            Text(title).foregroundStyle(.white.opacity(0.56))
-            Spacer(minLength: 8)
-            Text(value)
-                .font(.system(.subheadline, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.9))
-                .multilineTextAlignment(.trailing)
         }
     }
 }
 
-private struct GlassCard<Content: View>: View {
-    let content: Content
+private struct FieldOrb: View {
+    let isMeasuring: Bool
+    let magnitude: Double
+    let tint: Color
+    @State private var pulse = false
 
-    init(@ViewBuilder content: () -> Content) {
-        self.content = content()
-    }
+    private var intensity: Double { min(max(magnitude / 250.0, 0.0), 1.0) }
 
     var body: some View {
-        content
-            .padding(17)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background {
-                RoundedRectangle(cornerRadius: 23, style: .continuous)
-                    .fill(.ultraThinMaterial)
-                    .environment(\.colorScheme, .dark)
+        GeometryReader { proxy in
+            let side = min(proxy.size.width, proxy.size.height)
+            ZStack {
+                Circle()
+                    .fill(RadialGradient(colors: [tint.opacity(0.28), tint.opacity(0.06), .clear],
+                                         center: .center, startRadius: side * 0.08, endRadius: side * 0.62))
+                    .scaleEffect(isMeasuring ? (pulse ? 1.06 + intensity * 0.05 : 0.98) : 1)
+                    .blur(radius: 8)
+
+                Circle()
+                    .fill(RadialGradient(stops: [
+                        .init(color: tint.opacity(0.82), location: 0),
+                        .init(color: tint.opacity(0.55), location: 0.25),
+                        .init(color: Color.blue.opacity(0.30), location: 0.58),
+                        .init(color: Color(red: 0.08, green: 0.04, blue: 0.22).opacity(0.68), location: 0.82),
+                        .init(color: tint.opacity(0.32), location: 1)
+                    ], center: .init(x: pulse ? 0.42 : 0.58, y: pulse ? 0.44 : 0.56),
+                       startRadius: side * 0.015, endRadius: side * 0.70))
                     .overlay {
-                        RoundedRectangle(cornerRadius: 23, style: .continuous)
-                            .fill(LinearGradient(colors: [.white.opacity(0.075), .white.opacity(0.015)],
-                                                 startPoint: .topLeading, endPoint: .bottomTrailing))
+                        Circle().stroke(LinearGradient(colors: [.white.opacity(0.9), tint.opacity(0.8), .white.opacity(0.22)],
+                                                       startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1.5)
                     }
+                    .overlay {
+                        Circle().stroke(tint.opacity(0.6), lineWidth: 5).blur(radius: 7)
+                    }
+                    .overlay {
+                        Circle().fill(LinearGradient(colors: [.white.opacity(0.24), .clear, tint.opacity(0.15)],
+                                                     startPoint: .topLeading, endPoint: .bottomTrailing))
+                            .mask(Circle().stroke(lineWidth: side * 0.055))
+                    }
+                    .shadow(color: tint.opacity(0.28 + intensity * 0.28), radius: 25 + intensity * 20, y: 8)
+                    .scaleEffect(isMeasuring ? (pulse ? 1.0 + intensity * 0.025 : 0.975) : 1)
+                    .rotationEffect(.degrees(isMeasuring ? (pulse ? 3.5 : -3.5) : 0))
+
+                // Concentric field contours echo scientific simulation plots.
+                ForEach(0..<7, id: \.self) { index in
+                    Circle()
+                        .stroke(tint.opacity(0.18 + intensity * 0.25), lineWidth: index == 0 ? 1.8 : 0.8)
+                        .frame(width: side * (0.16 + CGFloat(index) * 0.115),
+                               height: side * (0.16 + CGFloat(index) * 0.115))
+                        .blur(radius: index > 4 ? 0.6 : 0)
+                        .rotationEffect(.degrees(isMeasuring ? (pulse ? 9 : -9) : 0))
+                }
+
+                Circle()
+                    .fill(RadialGradient(colors: [.white.opacity(0.95), tint, tint.opacity(0.05)],
+                                         center: .center, startRadius: 0, endRadius: side * 0.09))
+                    .frame(width: side * (0.035 + intensity * 0.025),
+                           height: side * (0.035 + intensity * 0.025))
+                    .shadow(color: tint, radius: 16 + intensity * 18)
+
+                if !isMeasuring {
+                    Image(systemName: "play.fill")
+                        .font(.system(size: side * 0.065, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.92))
+                        .shadow(color: .black.opacity(0.25), radius: 5)
+                        .offset(y: side * 0.34)
+                }
             }
-            .overlay {
-                RoundedRectangle(cornerRadius: 23, style: .continuous)
-                    .stroke(LinearGradient(colors: [.white.opacity(0.19), .white.opacity(0.035)],
-                                           startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
+            .frame(width: side, height: side)
+            .contentShape(Circle())
+            .onAppear {
+                withAnimation(.easeInOut(duration: isMeasuring ? 1.7 : 3.0).repeatForever(autoreverses: true)) {
+                    pulse = true
+                }
             }
-            .shadow(color: .black.opacity(0.13), radius: 15, y: 7)
+            .onChange(of: isMeasuring) { _, active in
+                withAnimation(.spring(response: 0.42, dampingFraction: 0.72)) {
+                    pulse = active
+                }
+                if active {
+                    withAnimation(.easeInOut(duration: 1.7).repeatForever(autoreverses: true)) {
+                        pulse = true
+                    }
+                }
+            }
+            .animation(.spring(response: 0.4, dampingFraction: 0.76), value: intensity)
+        }
     }
 }
 
-private struct PressScaleStyle: ButtonStyle {
+private struct OrbPressStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .scaleEffect(configuration.isPressed ? 0.975 : 1)
+            .scaleEffect(configuration.isPressed ? 0.965 : 1)
             .opacity(configuration.isPressed ? 0.88 : 1)
-            .animation(.spring(response: 0.28, dampingFraction: 0.72), value: configuration.isPressed)
+            .animation(.spring(response: 0.28, dampingFraction: 0.68), value: configuration.isPressed)
     }
 }
 
