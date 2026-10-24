@@ -83,6 +83,41 @@ struct MagneticAnomalyDetectorTests {
         expect(filter.update(.nan) == nil,
                "non-finite field changes must be rejected by the filter")
 
+        // The same static world field must remain identical after a quarter-turn.
+        // CMRotationMatrix is transposed by MagneticFieldVector.rotated to recover
+        // the reference-frame vector.
+        let worldField = MagneticFieldVector(x: 30.0, y: -10.0, z: 20.0)
+        let quarterTurnDeviceField = MagneticFieldVector(x: 10.0, y: 30.0, z: 20.0)
+        let orientationCorrected = quarterTurnDeviceField.rotated(
+            m11: 0.0, m12: -1.0, m13: 0.0,
+            m21: 1.0, m22: 0.0, m23: 0.0,
+            m31: 0.0, m32: 0.0, m33: 1.0
+        )
+        expect(abs(orientationCorrected.x - worldField.x) < 1e-9
+               && abs(orientationCorrected.y - worldField.y) < 1e-9
+               && abs(orientationCorrected.z - worldField.z) < 1e-9,
+               "orientation compensation should recover a fixed field after a 90-degree turn")
+
+        // Fast turns immediately invalidate the display; it recovers only after calm samples.
+        var stabilityGate = OrientationStabilityGate()
+        for _ in 0..<3 {
+            expect(!stabilityGate.update(rotationRateRadiansPerSecond: 0.10),
+                   "stability gate should debounce initial motion samples")
+        }
+        expect(stabilityGate.update(rotationRateRadiansPerSecond: 0.10),
+               "stability gate should recover after four calm samples")
+        expect(!stabilityGate.update(rotationRateRadiansPerSecond: 0.60),
+               "fast phone rotation must immediately invalidate readings")
+        expect(!stabilityGate.update(rotationRateRadiansPerSecond: 0.25),
+               "the hysteresis band must not immediately mark a moving phone stable")
+        for _ in 0..<4 {
+            _ = stabilityGate.update(rotationRateRadiansPerSecond: 0.10)
+        }
+        expect(stabilityGate.isStable,
+               "stability gate should recover after rotation stops")
+        expect(!stabilityGate.update(rotationRateRadiansPerSecond: .infinity),
+               "invalid angular-rate data must fail closed")
+
         print("PASS: MagneticAnomalyDetectorTests")
     }
 }
