@@ -50,6 +50,7 @@ final class MagnetometerService: ObservableObject {
     private var rawSamples: [MagneticSample] = []
     private var lastUIPublish: Date = .distantPast
     private var lastDeliveryTimestamp: TimeInterval?
+    private var smoothedDeliveryRateHz: Double?
     private var baselineStartTimestamp: TimeInterval?
     private var baselineSampleCount = 0
     private var baselineSumX = 0.0
@@ -78,6 +79,7 @@ final class MagnetometerService: ObservableObject {
         lastUIPublish = .distantPast
         lastDeliveryTimestamp = nil
         observedDeliveryRateHz = nil
+        smoothedDeliveryRateHz = nil
         baselineCaptured = false
         calibrationQuality = "Unknown"
         baselineStartTimestamp = nil
@@ -167,27 +169,30 @@ final class MagnetometerService: ObservableObject {
 
                 self.rawSamples.append(sample)
                 if self.rawSamples.count > self.maximumStoredSamples {
-                    self.rawSamples.removeFirst(self.rawSamples.count - self.maximumStoredSamples)
+                    // Trim in chunks rather than shifting a 20k-element array every sample.
+                    self.rawSamples.removeFirst(max(1, self.maximumStoredSamples / 100))
                 }
 
                 if let previous = self.lastDeliveryTimestamp {
                     let delta = deliveryTimestamp - previous
                     if delta > 0 {
                         let instantaneousRate = 1.0 / delta
-                        // Smooth the diagnostic rate so one delayed callback does not dominate it.
-                        self.observedDeliveryRateHz = self.observedDeliveryRateHz.map {
+                        // Keep the per-sample estimate private; publish it at the UI update rate.
+                        self.smoothedDeliveryRateHz = self.smoothedDeliveryRateHz.map {
                             $0 * 0.8 + instantaneousRate * 0.2
                         } ?? instantaneousRate
                     }
                 }
                 self.lastDeliveryTimestamp = deliveryTimestamp
-                self.latestSample = sample
 
                 let now = Date()
                 if now.timeIntervalSince(self.lastUIPublish) >= self.uiPublishInterval {
+                    self.latestSample = sample
+                    self.observedDeliveryRateHz = self.smoothedDeliveryRateHz
                     self.samples.append(sample)
                     if self.samples.count > self.maximumChartSamples {
-                        self.samples.removeFirst(self.samples.count - self.maximumChartSamples)
+                        // Trim in chunks to avoid repeated large array shifts during long sessions.
+                        self.samples.removeFirst(max(1, self.maximumChartSamples / 100))
                     }
                     self.lastUIPublish = now
                 }
@@ -213,6 +218,7 @@ final class MagnetometerService: ObservableObject {
         latestSample = nil
         lastDeliveryTimestamp = nil
         observedDeliveryRateHz = nil
+        smoothedDeliveryRateHz = nil
         baselineCaptured = false
         calibrationQuality = "Unknown"
         baselineStartTimestamp = nil
