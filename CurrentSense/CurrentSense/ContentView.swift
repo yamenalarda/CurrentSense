@@ -61,7 +61,8 @@ struct ContentView: View {
     @State private var showShareSheet = false
     @State private var exportURL: URL?
 
-    private var fieldMagnitude: Double? { sensor.latestSample?.magnitude }
+    // Show field change from the captured background baseline, not Earth's total field.
+    private var fieldMagnitude: Double? { sensor.latestSample?.deltaMagnitude }
     private var fieldColor: Color { FieldPalette.color(for: fieldMagnitude ?? 0) }
 
     var body: some View {
@@ -99,14 +100,25 @@ struct ContentView: View {
                         .padding(.top, 4)
 
                     VStack(spacing: 8) {
-                        Text(sensor.isRunning ? "Tap the circle to stop measuring" : "Tap the circle to start measuring")
-                            .font(.system(size: 17, weight: .medium, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.94))
-                            .contentTransition(.opacity)
-                        Text("Place the back of your iPhone near the insulated cable")
-                            .font(.system(size: 13, weight: .regular, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.62))
-                            .multilineTextAlignment(.center)
+                        Text(
+                            !sensor.isRunning
+                                ? "Tap the circle to begin"
+                                : (!sensor.baselineCaptured
+                                    ? "Capturing baseline — keep iPhone away from cable"
+                                    : "Baseline ready — move iPhone near the cable")
+                        )
+                        .font(.system(size: 16, weight: .medium, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.94))
+                        .multilineTextAlignment(.center)
+                        .contentTransition(.opacity)
+                        Text(
+                            mode == .ac
+                                ? "AC current is not calculated; this shows field change only."
+                                : "DC current is not calculated from field change alone."
+                        )
+                        .font(.system(size: 12, weight: .regular, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.62))
+                        .multilineTextAlignment(.center)
                         if let error = sensor.errorMessage {
                             Text(error)
                                 .font(.caption)
@@ -115,11 +127,16 @@ struct ContentView: View {
                         }
                         if sensor.isRunning {
                             HStack(spacing: 6) {
-                                Circle().fill(fieldColor).frame(width: 6, height: 6)
-                                Text("LIVE FIELD")
+                                Circle().fill(sensor.baselineCaptured ? fieldColor : .yellow).frame(width: 6, height: 6)
+                                Text(sensor.baselineCaptured ? "LIVE FIELD CHANGE" : "CAPTURING BASELINE")
                                     .font(.system(size: 10, weight: .bold, design: .rounded))
-                                    .tracking(1.6)
-                                    .foregroundStyle(fieldColor)
+                                    .tracking(1.2)
+                                    .foregroundStyle(sensor.baselineCaptured ? fieldColor : .yellow)
+                                if let rate = sensor.observedDeliveryRateHz {
+                                    Text(String(format: "· %.0f Hz", rate))
+                                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                                        .foregroundStyle(.white.opacity(0.55))
+                                }
                             }
                             .padding(.top, 2)
                         }
@@ -230,17 +247,17 @@ struct ContentView: View {
     private var measurementBar: some View {
         HStack(spacing: 0) {
             metricColumn(title: "CURRENT", value: "—", unit: "A",
-                         detail: "Needs calibration",
-                         tint: .white.opacity(0.65)
+                         detail: "Not calculated",
+                         tint: .white.opacity(0.65))
             separator
-            metricColumn(title: "CALIBRATED FIELD",
-                         value: fieldMagnitude.map { String(format: "%.1f", $0) } ?? "—",
+            metricColumn(title: "FIELD CHANGE",
+                         value: fieldMagnitude.map { String(format: "%.2f", $0) } ?? "—",
                          unit: "µT",
-                         detail: sensor.isRunning ? "Core Motion estimate" : "Tap sphere to begin",
+                         detail: sensor.baselineCaptured ? "Relative to baseline" : (sensor.isRunning ? "Capturing baseline" : "Baseline required"),
                          tint: fieldColor)
             separator
             metricColumn(title: "DISTANCE", value: "—", unit: "cm",
-                         detail: "Not detectable yet",
+                         detail: "Not inferable",
                          tint: .white.opacity(0.65))
         }
         .padding(.vertical, 16)
