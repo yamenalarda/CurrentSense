@@ -9,12 +9,26 @@ private enum MeasurementMode: String, CaseIterable, Identifiable {
 }
 
 private enum FieldPalette {
-    static let background = LinearGradient(
-        colors: [Color(red: 0.018, green: 0.035, blue: 0.075),
-                 Color(red: 0.035, green: 0.055, blue: 0.12),
-                 Color(red: 0.012, green: 0.02, blue: 0.05)],
-        startPoint: .topLeading, endPoint: .bottomTrailing
-    )
+    static func background(for scheme: ColorScheme) -> LinearGradient {
+        if scheme == .dark {
+            return LinearGradient(
+                colors: [
+                    Color(red: 0.018, green: 0.035, blue: 0.075),
+                    Color(red: 0.035, green: 0.055, blue: 0.12),
+                    Color(red: 0.012, green: 0.02, blue: 0.05)
+                ],
+                startPoint: .topLeading, endPoint: .bottomTrailing
+            )
+        }
+        return LinearGradient(
+            colors: [
+                Color(red: 0.98, green: 0.99, blue: 1.00),
+                Color(red: 0.90, green: 0.94, blue: 1.00),
+                Color(red: 0.96, green: 0.975, blue: 1.00)
+            ],
+            startPoint: .topLeading, endPoint: .bottomTrailing
+        )
+    }
 
     // Simulation-style heat map: low field = blue, high field = red.
     static func color(for magnitude: Double) -> Color {
@@ -56,10 +70,19 @@ private extension Color {
 }
 
 struct ContentView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @StateObject private var sensor = MagnetometerService()
     @State private var mode: MeasurementMode = .ac
-    @State private var showShareSheet = false
-    @State private var exportURL: URL?
+
+    private var primaryTextColor: Color {
+        colorScheme == .dark ? .white.opacity(0.94) : .black.opacity(0.86)
+    }
+    private var secondaryTextColor: Color {
+        colorScheme == .dark ? .white.opacity(0.62) : .black.opacity(0.62)
+    }
+    private var mutedTextColor: Color {
+        colorScheme == .dark ? .white.opacity(0.58) : .black.opacity(0.56)
+    }
 
     // Show field change from the captured background baseline, not Earth's total field.
     private var fieldMagnitude: Double? { sensor.latestSample?.deltaMagnitude }
@@ -68,14 +91,11 @@ struct ContentView: View {
     var body: some View {
         GeometryReader { geometry in
             ZStack {
-                FieldPalette.background.ignoresSafeArea()
+                FieldPalette.background(for: colorScheme).ignoresSafeArea()
                 ambientGlow
                 VStack(spacing: 0) {
-                    topControls
-                        .padding(.top, 8)
-
                     modePicker
-                        .padding(.top, 24)
+                        .padding(.top, 16)
                         .padding(.horizontal, 34)
 
                     Spacer(minLength: 12)
@@ -108,7 +128,7 @@ struct ContentView: View {
                                     : "Baseline ready — move iPhone near the cable")
                         )
                         .font(.system(size: 16, weight: .medium, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.94))
+                        .foregroundStyle(primaryTextColor)
                         .multilineTextAlignment(.center)
                         .contentTransition(.opacity)
                         Text(
@@ -119,7 +139,7 @@ struct ContentView: View {
                                     : "Keep the phone still. DC current is not calculated.")
                         )
                         .font(.system(size: 12, weight: .regular, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.62))
+                        .foregroundStyle(secondaryTextColor)
                         .multilineTextAlignment(.center)
                         if let error = sensor.errorMessage {
                             Text(error)
@@ -136,11 +156,13 @@ struct ContentView: View {
                                     .foregroundStyle(sensor.baselineCaptured ? fieldColor : .yellow)
                                 Text("· CAL \(sensor.calibrationQuality.uppercased())")
                                     .font(.system(size: 9, weight: .semibold, design: .rounded))
-                                    .foregroundStyle(sensor.calibrationQuality == "High" ? .white.opacity(0.72) : .yellow.opacity(0.9))
+                                    .foregroundStyle(sensor.calibrationQuality == "High"
+                                                     ? (colorScheme == .dark ? .white.opacity(0.72) : .black.opacity(0.65))
+                                                     : .yellow.opacity(0.9))
                                 if let rate = sensor.observedDeliveryRateHz {
                                     Text(String(format: "· %.0f Hz", rate))
                                         .font(.system(size: 10, weight: .medium, design: .rounded))
-                                        .foregroundStyle(.white.opacity(0.55))
+                                        .foregroundStyle(secondaryTextColor)
                                 }
                             }
                             .padding(.top, 2)
@@ -159,14 +181,11 @@ struct ContentView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .preferredColorScheme(.dark)
-        .tint(.white)
+        // No preferredColorScheme override: SwiftUI follows the device's appearance.
+        .tint(colorScheme == .dark ? .white : .black)
         .animation(.spring(response: 0.42, dampingFraction: 0.78), value: sensor.isRunning)
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: mode)
         .animation(.spring(response: 0.45, dampingFraction: 0.76), value: fieldMagnitude)
-        .sheet(isPresented: $showShareSheet) {
-            if let exportURL { ShareSheet(items: [exportURL]) }
-        }
         .onDisappear { sensor.stop() }
     }
 
@@ -191,27 +210,6 @@ struct ContentView: View {
         .animation(.easeInOut(duration: 0.6), value: fieldColor)
     }
 
-    private var topControls: some View {
-        HStack {
-            Spacer()
-            Button {
-                guard let url = sensor.exportCSV() else { return }
-                exportURL = url
-                showShareSheet = true
-            } label: {
-                Image(systemName: "square.and.arrow.up")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.9))
-                    .frame(width: 42, height: 42)
-                    .background(.ultraThinMaterial, in: Circle())
-                    .overlay(Circle().stroke(.white.opacity(0.16), lineWidth: 1))
-            }
-            .disabled(sensor.samples.isEmpty)
-            .accessibilityLabel("Export measurements as CSV")
-        }
-        .padding(.horizontal, 20)
-    }
-
     private var modePicker: some View {
         HStack(spacing: 5) {
             ForEach(MeasurementMode.allCases) { item in
@@ -228,7 +226,8 @@ struct ContentView: View {
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
-                    .foregroundStyle(mode == item ? .white : .white.opacity(0.55))
+                    .foregroundStyle(mode == item ? .white :
+                        (colorScheme == .dark ? .white.opacity(0.55) : .black.opacity(0.58)))
                     .background {
                         if mode == item {
                             RoundedRectangle(cornerRadius: 24, style: .continuous)
@@ -246,14 +245,17 @@ struct ContentView: View {
         }
         .padding(5)
         .background(.ultraThinMaterial, in: Capsule())
-        .overlay(Capsule().stroke(.white.opacity(0.18), lineWidth: 1))
+        .overlay(Capsule().stroke(
+            colorScheme == .dark ? .white.opacity(0.18) : .black.opacity(0.10),
+            lineWidth: 1
+        ))
     }
 
     private var measurementBar: some View {
         HStack(spacing: 0) {
             metricColumn(title: "CURRENT", value: "—", unit: "A",
                          detail: "Not calculated",
-                         tint: .white.opacity(0.65))
+                         tint: secondaryTextColor)
             separator
             metricColumn(title: "FIELD CHANGE",
                          value: fieldMagnitude.map { String(format: "%.1f", $0) } ?? "—",
@@ -263,7 +265,7 @@ struct ContentView: View {
             separator
             metricColumn(title: "DISTANCE", value: "—", unit: "cm",
                          detail: "Not inferable",
-                         tint: .white.opacity(0.65))
+                         tint: secondaryTextColor)
         }
         .padding(.vertical, 16)
         .padding(.horizontal, 8)
@@ -272,22 +274,30 @@ struct ContentView: View {
                 .fill(.ultraThinMaterial)
                 .overlay {
                     RoundedRectangle(cornerRadius: 24, style: .continuous)
-                        .fill(LinearGradient(colors: [.white.opacity(0.10), .white.opacity(0.015)],
-                                             startPoint: .topLeading, endPoint: .bottomTrailing)
+                        .fill(LinearGradient(
+                            colors: colorScheme == .dark
+                                ? [.white.opacity(0.10), .white.opacity(0.015)]
+                                : [.white.opacity(0.70), .white.opacity(0.20)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        )
                         )
                 }
         }
         .overlay {
             RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(LinearGradient(colors: [.white.opacity(0.26), .white.opacity(0.06)],
-                                       startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
+                .stroke(LinearGradient(
+                    colors: colorScheme == .dark
+                        ? [.white.opacity(0.26), .white.opacity(0.06)]
+                        : [.white.opacity(0.92), .black.opacity(0.07)],
+                    startPoint: .topLeading, endPoint: .bottomTrailing
+                ), lineWidth: 1)
         }
         .shadow(color: fieldColor.opacity(0.12), radius: 22, y: 8)
     }
 
     private var separator: some View {
         Rectangle()
-            .fill(.white.opacity(0.12))
+            .fill(colorScheme == .dark ? .white.opacity(0.12) : .black.opacity(0.12))
             .frame(width: 1, height: 54)
     }
 
@@ -297,7 +307,7 @@ struct ContentView: View {
             Text(title)
                 .font(.system(size: 9, weight: .bold, design: .rounded))
                 .tracking(0.8)
-                .foregroundStyle(.white.opacity(0.58))
+                .foregroundStyle(mutedTextColor)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
             HStack(alignment: .firstTextBaseline, spacing: 3) {
@@ -305,12 +315,12 @@ struct ContentView: View {
                     .font(.system(size: 23, weight: .medium, design: .rounded))
                     .monospacedDigit()
                     .contentTransition(.numericText())
-                    .foregroundStyle(.white)
+                    .foregroundStyle(primaryTextColor)
                     .lineLimit(1)
                     .minimumScaleFactor(0.6)
                 Text(unit)
                     .font(.system(size: 11, weight: .medium, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.76))
+                    .foregroundStyle(secondaryTextColor)
             }
             Text(detail)
                 .font(.system(size: 9, weight: .medium, design: .rounded))
@@ -488,10 +498,3 @@ private struct OrbPressStyle: ButtonStyle {
     }
 }
 
-private struct ShareSheet: UIViewControllerRepresentable {
-    let items: [Any]
-    func makeUIViewController(context: Context) -> UIActivityViewController {
-        UIActivityViewController(activityItems: items, applicationActivities: nil)
-    }
-    func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
-}
