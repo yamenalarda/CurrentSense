@@ -1028,7 +1028,7 @@ private struct CalculationSettingsView: View {
     private var referenceCurrentA = "1.0"
     @AppStorage("CurrentSense.calibration.acSensitivity")
     private var acSensitivityMicroteslaPerAmp = 0.0
-    @AppStorage("CurrentSense.calibration.dcSensitivity.v2")
+    @AppStorage("CurrentSense.calibration.dcSensitivity.v3")
     private var dcSensitivityMicroteslaPerAmp = 0.0
 
     @State private var calibrationReferenceCurrentA = "1.0"
