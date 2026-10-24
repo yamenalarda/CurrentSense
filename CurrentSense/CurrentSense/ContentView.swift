@@ -893,7 +893,7 @@ private struct CalculationSettingsView: View {
                         Spacer()
                         Text(sensor.calibrationQuality)
                             .foregroundStyle(sensor.calibrationQuality == "High"
-                                ? .primary : .orange)
+                                ? Color.primary : Color.orange)
                     }
                     HStack {
                         Text("Total calibrated field")
