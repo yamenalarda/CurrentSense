@@ -216,8 +216,8 @@ struct ContentView: View {
                             !sensor.isRunning
                                 ? "Start away from the cable and hold still while the baseline is captured."
                                 : (mode == .ac
-                                    ? "Keep the phone still. AC current is not calculated."
-                                    : "Keep the phone still. DC current is not calculated.")
+                                    ? "AC estimates need same-setup calibration and may not represent true RMS."
+                                    : "Keep the phone still. Estimate depends on wiring setup and reference.")
                         )
                         .font(.system(size: 12, weight: .regular, design: .rounded))
                         .foregroundStyle(secondaryTextColor)
