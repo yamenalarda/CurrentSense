@@ -313,8 +313,8 @@ struct ContentView: View {
 
     private var calculationSettingsSheet: some View {
         CalculationSettingsView(
-            isAC: mode == .ac,
             sensor: sensor,
+            isAC: mode == .ac,
             onCalibrate: { referenceAmps, fieldMicrotesla, acMode in
                 saveCalibration(
                     referenceAmps: referenceAmps,
