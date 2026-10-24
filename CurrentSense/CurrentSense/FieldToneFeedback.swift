@@ -18,7 +18,11 @@ final class FieldToneFeedback: ObservableObject {
     private var isToneActive = false
     private var smoothedRate: Double?
 
-    func update(fieldChangeMicrotesla: Double?, measuring: Bool) {
+    func update(
+        fieldChangeMicrotesla: Double?,
+        measuring: Bool,
+        minimumThresholdMicrotesla: Double = FieldToneMapping.activationThresholdMicrotesla
+    ) {
         guard measuring,
               let field = fieldChangeMicrotesla,
               field.isFinite,
@@ -27,18 +31,29 @@ final class FieldToneFeedback: ObservableObject {
             return
         }
 
+        let activationThreshold = minimumThresholdMicrotesla.isFinite && minimumThresholdMicrotesla > 0
+            ? max(FieldToneMapping.activationThresholdMicrotesla, minimumThresholdMicrotesla)
+            : FieldToneMapping.activationThresholdMicrotesla
+        let releaseThreshold = max(
+            FieldToneMapping.releaseThresholdMicrotesla,
+            activationThreshold * 0.60
+        )
+
         if isToneActive {
-            guard field >= FieldToneMapping.releaseThresholdMicrotesla else {
+            guard field >= releaseThreshold else {
                 stopTone()
                 return
             }
         } else {
-            guard field >= FieldToneMapping.activationThresholdMicrotesla else { return }
+            guard field >= activationThreshold else { return }
             guard startToneIfPossible() else { return }
         }
 
-        let mappingField = max(field, FieldToneMapping.activationThresholdMicrotesla)
-        guard let targetRate = FieldToneMapping.rate(forFieldChangeMicrotesla: mappingField) else {
+        let mappingField = max(field, activationThreshold)
+        guard let targetRate = FieldToneMapping.rate(
+            forFieldChangeMicrotesla: mappingField,
+            activationThresholdMicrotesla: activationThreshold
+        ) else {
             return
         }
 
