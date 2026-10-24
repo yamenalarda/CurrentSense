@@ -12,13 +12,20 @@ enum FieldToneMapping {
     /// Returns nil below the activation threshold or for invalid sensor input.
     /// Logarithmic mapping keeps weak changes distinguishable without making
     /// high readings immediately pin the tone to its maximum pitch.
-    static func rate(forFieldChangeMicrotesla field: Double) -> Double? {
-        guard field.isFinite, field >= activationThresholdMicrotesla else { return nil }
-        let span = log(maximumMappedFieldMicrotesla / activationThresholdMicrotesla)
+    static func rate(
+        forFieldChangeMicrotesla field: Double,
+        activationThresholdMicrotesla requestedThreshold: Double = activationThresholdMicrotesla
+    ) -> Double? {
+        let threshold = requestedThreshold.isFinite && requestedThreshold > 0
+            ? max(activationThresholdMicrotesla, requestedThreshold)
+            : activationThresholdMicrotesla
+        guard field.isFinite, field >= threshold else { return nil }
+        let ceiling = max(maximumMappedFieldMicrotesla, threshold * 4.0)
+        let span = log(ceiling / threshold)
         guard span.isFinite, span > 0 else { return nil }
 
         let normalized = min(
-            max(log(field / activationThresholdMicrotesla) / span, 0.0),
+            max(log(field / threshold) / span, 0.0),
             1.0
         )
         let rate = minimumPlaybackRate
