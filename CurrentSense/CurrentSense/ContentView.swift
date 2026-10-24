@@ -950,16 +950,16 @@ private struct FieldOrb: View {
             }
             .onChange(of: isMeasuring) { _, active in
                 if active {
-                    withAnimation(.spring(response: 0.48, dampingFraction: 0.68)) {
-                        drift = true
-                        detectionPulse = false
-                    }
+                    detectionPulse = false
+                    // Run one repeatable animation; don't layer a spring and a second
+                    // infinite animation on the same state during the start transition.
                     withAnimation(.easeInOut(duration: 2.1).repeatForever(autoreverses: true)) {
-                        drift = false
+                        drift = true
                     }
                 } else {
                     withAnimation(.spring(response: 0.5, dampingFraction: 0.72)) {
                         drift = false
+                        detectionPulse = false
                     }
                     if proximitySignal {
                         withAnimation(.easeInOut(duration: 1.15).repeatForever(autoreverses: true)) {
