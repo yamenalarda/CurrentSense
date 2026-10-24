@@ -69,6 +69,20 @@ struct MagneticAnomalyDetectorTests {
         expect(!detector.hasBaseline && !detector.isDetected,
                "reset should clear baseline and state")
 
+        // A lone raw spike must not dominate the filtered field-change value.
+        var filter = FieldDeltaFilter(windowSize: 7, smoothingFactor: 0.4)
+        var filtered: Double?
+        for _ in 0..<7 { filtered = filter.update(1.0) }
+        filtered = filter.update(100.0)
+        expect(abs((filtered ?? -1) - 1.0) < 1e-9,
+               "median filter should reject an isolated field spike")
+        for _ in 0..<7 { filtered = filter.update(5.0) }
+        expect((filtered ?? 0) > 1.0 && (filtered ?? 99) <= 5.0,
+               "filtered output should track a sustained increase without overshooting")
+        filter.reset()
+        expect(filter.update(.nan) == nil,
+               "non-finite field changes must be rejected by the filter")
+
         print("PASS: MagneticAnomalyDetectorTests")
     }
 }
