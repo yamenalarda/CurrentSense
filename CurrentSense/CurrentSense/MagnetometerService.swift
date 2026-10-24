@@ -46,7 +46,7 @@ final class MagnetometerService: ObservableObject {
         return q
     }()
 
-    private let maximumStoredSamples = 20_000
+    private let maximumStoredSamples = 60_000
     private let maximumChartSamples = 5_000
     private let uiPublishInterval: TimeInterval = 0.10
     private let baselineCaptureDuration: TimeInterval = 2.0
