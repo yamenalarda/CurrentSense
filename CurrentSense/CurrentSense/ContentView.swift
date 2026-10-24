@@ -138,7 +138,7 @@ struct ContentView: View {
                         .contentTransition(.opacity)
                         Text(
                             !sensor.isRunning
-                                ? "Start away from the cable; keep the phone orientation fixed."
+                                ? "Start away from the cable and hold still while the baseline is captured."
                                 : (mode == .ac
                                     ? "Keep the phone still. AC current is not calculated."
                                     : "Keep the phone still. DC current is not calculated.")
