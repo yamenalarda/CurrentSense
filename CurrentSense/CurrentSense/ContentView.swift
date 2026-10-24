@@ -224,17 +224,17 @@ struct ContentView: View {
     private var measurementBar: some View {
         HStack(spacing: 0) {
             metricColumn(title: "CURRENT", value: "—", unit: "A",
-                         detail: mode == .ac ? "AC • 50 Hz" : "DC",
-                         tint: fieldColor)
+                         detail: "Needs calibration",
+                         tint: .white.opacity(0.65)
             separator
-            metricColumn(title: "MAGNETIC FIELD",
+            metricColumn(title: "CALIBRATED FIELD",
                          value: fieldMagnitude.map { String(format: "%.1f", $0) } ?? "—",
                          unit: "µT",
-                         detail: sensor.isRunning ? "Live reading" : "Tap sphere to begin",
+                         detail: sensor.isRunning ? "Core Motion estimate" : "Tap sphere to begin",
                          tint: fieldColor)
             separator
             metricColumn(title: "DISTANCE", value: "—", unit: "cm",
-                         detail: "Not measured",
+                         detail: "Not detectable yet",
                          tint: .white.opacity(0.65))
         }
         .padding(.vertical, 16)
