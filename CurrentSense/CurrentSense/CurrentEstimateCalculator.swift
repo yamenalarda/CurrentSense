@@ -71,7 +71,8 @@ enum CurrentEstimateCalculator {
         isAC: Bool,
         conductor: ConductorConfiguration,
         reference: EstimationReference,
-        sensorCalibrationQuality: String
+        sensorCalibrationQuality: String,
+        baselineNoiseSigmaMicrotesla: Double? = nil
     ) -> CurrentEstimate {
         guard let field = fieldChangeMicrotesla else {
             return .unavailable(
@@ -87,11 +88,21 @@ enum CurrentEstimateCalculator {
             )
         }
 
-        guard field >= minimumUsableFieldChangeMicrotesla else {
+        let adaptiveNoiseThreshold: Double
+        if let noise = baselineNoiseSigmaMicrotesla, noise.isFinite, noise > 0 {
+            adaptiveNoiseThreshold = max(minimumUsableFieldChangeMicrotesla, noise * 5.0)
+        } else {
+            adaptiveNoiseThreshold = minimumUsableFieldChangeMicrotesla
+        }
+
+        guard field >= adaptiveNoiseThreshold else {
             return .unavailable(
                 currentDetail: "Signal too weak",
                 distanceDetail: "Signal too weak",
-                caution: "The field change is below the minimum threshold. Move closer only if safe, keep the phone still, and capture a fresh reading."
+                caution: String(
+                    format: "Field change is below the %.3f µT noise-adjusted threshold. Hold still, capture a clean baseline, and retry.",
+                    adaptiveNoiseThreshold
+                )
             )
         }
 
