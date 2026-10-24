@@ -10,11 +10,15 @@ struct MagneticSample: Identifiable {
     let x: Double
     let y: Double
     let z: Double
+    /// Total calibrated field magnitude, including Earth's field.
     let magnitude: Double
+    /// Vector change from the averaged start baseline. Nil while the baseline is being captured.
+    let deltaMagnitude: Double?
 
     var csvRow: String {
         let formatter = ISO8601DateFormatter()
-        return "\(formatter.string(from: timestamp)),\(x),\(y),\(z),\(magnitude)"
+        let delta = deltaMagnitude.map { String($0) } ?? ""
+        return "\(formatter.string(from: timestamp)),\(x),\(y),\(z),\(magnitude),\(delta)"
     }
 }
 
@@ -26,6 +30,7 @@ final class MagnetometerService: ObservableObject {
     @Published private(set) var samples: [MagneticSample] = []
     @Published private(set) var errorMessage: String?
     @Published private(set) var observedDeliveryRateHz: Double?
+    @Published private(set) var baselineCaptured = false
 
     private let motionManager = CMMotionManager()
     private let queue: OperationQueue = {
@@ -39,9 +44,19 @@ final class MagnetometerService: ObservableObject {
     private let maximumStoredSamples = 20_000
     private let maximumChartSamples = 5_000
     private let uiPublishInterval: TimeInterval = 0.10
+    private let baselineCaptureDuration: TimeInterval = 2.0
+    private let minimumBaselineSamples = 10
     private var rawSamples: [MagneticSample] = []
     private var lastUIPublish: Date = .distantPast
     private var lastDeliveryTimestamp: TimeInterval?
+    private var baselineStartTimestamp: TimeInterval?
+    private var baselineSampleCount = 0
+    private var baselineSumX = 0.0
+    private var baselineSumY = 0.0
+    private var baselineSumZ = 0.0
+    private var baselineX: Double?
+    private var baselineY: Double?
+    private var baselineZ: Double?
 
     init() {
         isAvailable = motionManager.isDeviceMotionAvailable
@@ -62,10 +77,20 @@ final class MagnetometerService: ObservableObject {
         lastUIPublish = .distantPast
         lastDeliveryTimestamp = nil
         observedDeliveryRateHz = nil
+        baselineCaptured = false
+        baselineStartTimestamp = nil
+        baselineSampleCount = 0
+        baselineSumX = 0
+        baselineSumY = 0
+        baselineSumZ = 0
+        baselineX = nil
+        baselineY = nil
+        baselineZ = nil
 
-        // Core Motion's deviceMotion magneticField is calibrated by Core Motion.
-        // This is not a lab-grade calibrated ammeter or a guarantee of 50 Hz bandwidth.
-        motionManager.deviceMotionUpdateInterval = 1.0 / 50.0
+        // Request 100 Hz to improve time resolution. Core Motion and the device
+        // hardware may deliver less; observedDeliveryRateHz reports the actual rate.
+        // This does not make mains-frequency AC current measurement reliable by itself.
+        motionManager.deviceMotionUpdateInterval = 1.0 / 100.0
         motionManager.startDeviceMotionUpdates(using: .xArbitraryCorrectedZVertical,
                                               to: queue) { [weak self] motion, error in
             if let error {
@@ -83,18 +108,52 @@ final class MagnetometerService: ObservableObject {
             let y = field.y
             let z = field.z
             guard x.isFinite, y.isFinite, z.isFinite else { return }
-
-            let sample = MagneticSample(
-                timestamp: Date(),
-                x: x,
-                y: y,
-                z: z,
-                magnitude: sqrt(x * x + y * y + z * z)
-            )
             let deliveryTimestamp = motion.timestamp
 
             Task { @MainActor in
                 guard let self, self.isRunning else { return }
+
+                if self.baselineStartTimestamp == nil {
+                    self.baselineStartTimestamp = deliveryTimestamp
+                }
+
+                // Average the first two seconds as an environmental reference.
+                // Start with the phone away from the cable, then move it close when ready.
+                if !self.baselineCaptured {
+                    self.baselineSumX += x
+                    self.baselineSumY += y
+                    self.baselineSumZ += z
+                    self.baselineSampleCount += 1
+
+                    let elapsed = deliveryTimestamp - (self.baselineStartTimestamp ?? deliveryTimestamp)
+                    if elapsed >= self.baselineCaptureDuration &&
+                       self.baselineSampleCount >= self.minimumBaselineSamples {
+                        let count = Double(self.baselineSampleCount)
+                        self.baselineX = self.baselineSumX / count
+                        self.baselineY = self.baselineSumY / count
+                        self.baselineZ = self.baselineSumZ / count
+                        self.baselineCaptured = true
+                    }
+                }
+
+                let magnitude = sqrt(x * x + y * y + z * z)
+                var deltaMagnitude: Double?
+                if let bx = self.baselineX, let by = self.baselineY, let bz = self.baselineZ {
+                    let dx = x - bx
+                    let dy = y - by
+                    let dz = z - bz
+                    deltaMagnitude = sqrt(dx * dx + dy * dy + dz * dz)
+                }
+
+                let sample = MagneticSample(
+                    timestamp: Date(),
+                    x: x,
+                    y: y,
+                    z: z,
+                    magnitude: magnitude,
+                    deltaMagnitude: deltaMagnitude
+                )
+
                 self.rawSamples.append(sample)
                 if self.rawSamples.count > self.maximumStoredSamples {
                     self.rawSamples.removeFirst(self.rawSamples.count - self.maximumStoredSamples)
@@ -103,7 +162,11 @@ final class MagnetometerService: ObservableObject {
                 if let previous = self.lastDeliveryTimestamp {
                     let delta = deliveryTimestamp - previous
                     if delta > 0 {
-                        self.observedDeliveryRateHz = 1.0 / delta
+                        let instantaneousRate = 1.0 / delta
+                        // Smooth the diagnostic rate so one delayed callback does not dominate it.
+                        self.observedDeliveryRateHz = self.observedDeliveryRateHz.map {
+                            $0 * 0.8 + instantaneousRate * 0.2
+                        } ?? instantaneousRate
                     }
                 }
                 self.lastDeliveryTimestamp = deliveryTimestamp
@@ -139,12 +202,21 @@ final class MagnetometerService: ObservableObject {
         latestSample = nil
         lastDeliveryTimestamp = nil
         observedDeliveryRateHz = nil
+        baselineCaptured = false
+        baselineStartTimestamp = nil
+        baselineSampleCount = 0
+        baselineSumX = 0
+        baselineSumY = 0
+        baselineSumZ = 0
+        baselineX = nil
+        baselineY = nil
+        baselineZ = nil
         lastUIPublish = .distantPast
     }
 
     func exportCSV() -> URL? {
         guard !rawSamples.isEmpty else { return nil }
-        let header = "timestamp_iso8601,x_uT,y_uT,z_uT,magnitude_uT"
+        let header = "timestamp_iso8601,x_uT,y_uT,z_uT,total_magnitude_uT,delta_from_baseline_uT"
         let body = rawSamples.map(\.csvRow).joined(separator: "\n")
         let contents = header + "\n" + body + "\n"
         let url = FileManager.default.temporaryDirectory
