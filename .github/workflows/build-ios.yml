@@ -67,7 +67,7 @@ jobs:
             -sdk iphoneos \
             -destination 'generic/platform=iOS' \
             -derivedDataPath "$RUNNER_TEMP/CurrentSenseDerivedData" \
-            MARKETING_VERSION=0.2.0 \
+            MARKETING_VERSION=0.3.0 \
             CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
