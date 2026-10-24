@@ -76,7 +76,7 @@ struct ContentView: View {
     @State private var showCalculationSetup = false
 
     @AppStorage("CurrentSense.calculation.conductor")
-    private var conductorRawValue = ConductorConfiguration.singleConductor.rawValue
+    private var conductorRawValue = ConductorConfiguration.completeCable.rawValue
     @AppStorage("CurrentSense.calculation.reference")
     private var referenceRawValue = ReferenceSelection.knownDistance.rawValue
     @AppStorage("CurrentSense.calculation.distanceCm")
@@ -760,7 +760,7 @@ private struct CalculationSettingsView: View {
     let onCalibrate: (Double, Double, Bool) -> Void
 
     @AppStorage("CurrentSense.calculation.conductor")
-    private var conductorRawValue = ConductorConfiguration.singleConductor.rawValue
+    private var conductorRawValue = ConductorConfiguration.completeCable.rawValue
     @AppStorage("CurrentSense.calculation.reference")
     private var referenceRawValue = ReferenceSelection.knownDistance.rawValue
     @AppStorage("CurrentSense.calculation.distanceCm")
