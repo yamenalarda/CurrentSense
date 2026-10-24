@@ -303,3 +303,44 @@ struct OrientationStabilityGate {
         consecutiveCalmSamples = 0
     }
 }
+
+
+/// A thread-safe, single-slot handoff for high-rate sensor callbacks.
+/// While the main actor is busy, intermediate readings are coalesced into the newest
+/// sample so stale work cannot build into an unbounded task backlog.
+final class LatestValueMailbox<Value: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var latestValue: Value?
+    private var drainScheduled = false
+
+    /// Returns true only when the caller should schedule a drain task.
+    @discardableResult
+    func offer(_ value: Value) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        latestValue = value
+        guard !drainScheduled else { return false }
+        drainScheduled = true
+        return true
+    }
+
+    /// Gets the newest value. A nil return completes the drain and allows a new task.
+    func takeNext() -> Value? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let value = latestValue else {
+            drainScheduled = false
+            return nil
+        }
+        latestValue = nil
+        return value
+    }
+
+    /// Discards queued work if the sensor session has ended or changed.
+    func discardAndFinish() {
+        lock.lock()
+        latestValue = nil
+        drainScheduled = false
+        lock.unlock()
+    }
+}

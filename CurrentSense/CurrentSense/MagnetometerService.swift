@@ -255,6 +255,7 @@ final class MagnetometerService: ObservableObject {
         motionGeneration &+= 1
         let generation = motionGeneration
         let snapshotBuffer = motionSnapshotBuffer
+        let deliveryMailbox = LatestValueMailbox<ProcessedMotionReading>()
 
         // Core Motion's calibrated stream supplies attitude + a bias-compensated
         // field for estimating the phone-fixed bias during the initial baseline.
@@ -309,7 +310,7 @@ final class MagnetometerService: ObservableObject {
 
         // Raw data is retained for anomaly detection because Apple's calibrated
         // CMDeviceMotion field can suppress some surrounding magnetic fields.
-        motionManager.startMagnetometerUpdates(to: queue) { [weak self, snapshotBuffer] data, error in
+        motionManager.startMagnetometerUpdates(to: queue) { [weak self, snapshotBuffer, deliveryMailbox] data, error in
             if let error {
                 Task { @MainActor in
                     guard let self, self.motionGeneration == generation else { return }
@@ -332,11 +333,20 @@ final class MagnetometerService: ObservableObject {
                 rawField: raw,
                 attitude: attitude
             )
-            Task { @MainActor [weak self] in
-                guard let self,
-                      self.isMonitoring,
-                      self.motionGeneration == generation else { return }
-                self.processMotionSample(reading)
+
+            // Keep at most one scheduled main-actor drain per measurement session.
+            // If the UI is busy, only the newest pending sample is retained.
+            guard deliveryMailbox.offer(reading) else { return }
+            Task { @MainActor [weak self, deliveryMailbox] in
+                while let pendingReading = deliveryMailbox.takeNext() {
+                    guard let self,
+                          self.isMonitoring,
+                          self.motionGeneration == generation else {
+                        deliveryMailbox.discardAndFinish()
+                        return
+                    }
+                    self.processMotionSample(pendingReading)
+                }
             }
         }
     }

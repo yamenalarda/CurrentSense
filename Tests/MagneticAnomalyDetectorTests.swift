@@ -209,6 +209,18 @@ struct MagneticAnomalyDetectorTests {
         expect(timestampFilter.update(2.0, timestamp: .nan) == nil,
                "non-finite sensor timestamps must be rejected")
 
+        // A busy main actor should only need one drain task; newer sensor readings
+        // replace stale pending work instead of creating an unbounded task queue.
+        let mailbox = LatestValueMailbox<Int>()
+        expect(mailbox.offer(1), "first mailbox value should request a drain")
+        expect(!mailbox.offer(2), "newer pending value should reuse the scheduled drain")
+        expect(!mailbox.offer(3), "subsequent values should not schedule extra drain tasks")
+        expect(mailbox.takeNext() == 3, "mailbox should yield the newest pending value")
+        expect(mailbox.takeNext() == nil, "empty mailbox should finish its drain")
+        expect(mailbox.offer(4), "a later value should start a new drain after completion")
+        expect(mailbox.takeNext() == 4, "new drain should yield its value")
+        expect(mailbox.takeNext() == nil, "new drain should finish cleanly")
+
         print("PASS: MagneticAnomalyDetectorTests")
     }
 }
