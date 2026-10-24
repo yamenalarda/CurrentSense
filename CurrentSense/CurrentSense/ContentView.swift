@@ -82,8 +82,14 @@ struct ContentView: View {
                     FieldOrb(isMeasuring: sensor.isRunning,
                              magnitude: fieldMagnitude ?? 0,
                              tint: fieldColor)
-                        .frame(width: min(geometry.size.width * 0.86, geometry.size.height * 0.48),
-                               height: min(geometry.size.width * 0.86, geometry.size.height * 0.48))
+                        .frame(
+                            width: sensor.isRunning
+                                ? min(geometry.size.width * 0.86, geometry.size.height * 0.48)
+                                : min(geometry.size.width * 0.48, geometry.size.height * 0.27),
+                            height: sensor.isRunning
+                                ? min(geometry.size.width * 0.86, geometry.size.height * 0.48)
+                                : min(geometry.size.width * 0.48, geometry.size.height * 0.27)
+                        )
                         .contentShape(Circle())
                         .onTapGesture { toggleMeasurement() }
                         .accessibilityElement()
