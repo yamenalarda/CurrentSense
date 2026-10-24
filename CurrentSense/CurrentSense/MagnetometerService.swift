@@ -155,7 +155,10 @@ final class MagnetometerService: ObservableObject {
     private func startMotionUpdates() {
         motionGeneration &+= 1
         let generation = motionGeneration
-        motionManager.startDeviceMotionUpdates(using: .xArbitraryCorrectedZVertical,
+        // Avoid magnetometer-corrected yaw during magnetic anomaly detection:
+        // a local magnetic source could otherwise influence the attitude used to
+        // rotate that same field vector. This frame can drift slowly over long sessions.
+        motionManager.startDeviceMotionUpdates(using: .xArbitraryZVertical,
                                                to: queue) { [weak self] motion, error in
             if let error {
                 Task { @MainActor in
