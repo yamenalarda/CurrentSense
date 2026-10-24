@@ -103,17 +103,7 @@ final class MagnetometerService: ObservableObject {
     /// Starts a measurement session without throwing away the standby baseline.
     /// If the phone is already near a magnetic source, the live delta is preserved.
     func start() {
-        guard isAvailable else {
-            startMonitoring()
-            guard isAvailable else { return }
-            // Monitoring now starts asynchronously; measurement state can still begin.
-            // The baseline will continue to capture until the required window is complete.
-            isRunning = true
-            motionManager.deviceMotionUpdateInterval = measurementUpdateInterval
-            return
-        }
         guard !isRunning else { return }
-
         if !isMonitoring {
             startMonitoring()
         }
@@ -122,24 +112,32 @@ final class MagnetometerService: ObservableObject {
         rawSamples.removeAll(keepingCapacity: true)
         samples.removeAll(keepingCapacity: true)
         lastUIPublish = .distantPast
-        lastDeliveryTimestamp = nil
-        smoothedDeliveryRateHz = nil
         observedDeliveryRateHz = nil
         isRunning = true
-        motionManager.deviceMotionUpdateInterval = measurementUpdateInterval
+        restartMotionUpdates(interval: measurementUpdateInterval)
     }
 
     /// Ends the measurement, but leaves low-rate monitoring active for the idle orb.
     func stop() {
         guard isRunning else { return }
         isRunning = false
-        motionManager.deviceMotionUpdateInterval = standbyUpdateInterval
+        restartMotionUpdates(interval: standbyUpdateInterval)
         if let latestSample, samples.last?.id != latestSample.id {
             samples.append(latestSample)
             if samples.count > maximumChartSamples {
                 samples.removeFirst(max(1, maximumChartSamples / 100))
             }
         }
+    }
+
+    /// Apply rate changes by restarting Core Motion, while retaining the baseline.
+    private func restartMotionUpdates(interval: TimeInterval) {
+        guard isMonitoring else { return }
+        motionManager.stopDeviceMotionUpdates()
+        motionManager.deviceMotionUpdateInterval = interval
+        lastDeliveryTimestamp = nil
+        smoothedDeliveryRateHz = nil
+        startMotionUpdates()
     }
 
     /// Stops sensor use when the screen goes away.
