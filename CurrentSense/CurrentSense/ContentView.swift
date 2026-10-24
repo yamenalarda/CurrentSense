@@ -72,6 +72,7 @@ struct ContentView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var sensor = MagnetometerService()
+    @StateObject private var toneFeedback = FieldToneFeedback()
     @State private var mode: MeasurementMode = .ac
     @State private var showCalculationSetup = false
 
@@ -170,9 +171,21 @@ struct ContentView: View {
                 sensor.startMonitoring()
             } else {
                 sensor.stopMonitoring()
+                toneFeedback.stopTone()
             }
         }
-        .onDisappear { sensor.stopMonitoring() }
+        .onChange(of: fieldMagnitude) { _, value in
+            toneFeedback.update(fieldChangeMicrotesla: value, measuring: sensor.isRunning)
+        }
+        .onChange(of: sensor.isRunning) { _, isRunning in
+            if !isRunning {
+                toneFeedback.stopTone()
+            }
+        }
+        .onDisappear {
+            sensor.stopMonitoring()
+            toneFeedback.stopTone()
+        }
         .sheet(isPresented: $showCalculationSetup) {
             calculationSettingsSheet
         }
@@ -495,6 +508,7 @@ struct ContentView: View {
     private func toggleMeasurement() {
         withAnimation(.spring(response: 0.42, dampingFraction: 0.72)) {
             if sensor.isRunning {
+                toneFeedback.stopTone()
                 sensor.stop()
             } else {
                 sensor.start()
