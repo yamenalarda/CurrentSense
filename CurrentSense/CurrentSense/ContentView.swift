@@ -191,7 +191,11 @@ struct ContentView: View {
             }
         }
         .onChange(of: fieldMagnitude) { _, value in
-            toneFeedback.update(fieldChangeMicrotesla: value, measuring: sensor.isRunning)
+            toneFeedback.update(
+                fieldChangeMicrotesla: value,
+                measuring: sensor.isRunning,
+                minimumThresholdMicrotesla: sensor.minimumUsableFieldChangeMicrotesla
+            )
         }
         .onChange(of: sensor.isRunning) { _, isRunning in
             if !isRunning {
@@ -963,14 +967,14 @@ private struct CalculationSettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                     HStack {
-                        Text("Sensor calibration")
+                        Text("Core Motion accuracy")
                         Spacer()
                         Text(sensor.calibrationQuality)
                             .foregroundStyle(sensor.calibrationQuality == "High"
                                 ? Color.primary : Color.orange)
                     }
                     HStack {
-                        Text("Total calibrated field")
+                        Text("Raw total field")
                         Spacer()
                         Text(sensor.latestSample.map {
                             String(format: "%.2f µT", $0.magnitude)
@@ -1018,7 +1022,7 @@ private struct CalculationSettingsView: View {
                     Text("Zero change means the sensor sees little difference from its captured baseline; it does not prove that current is zero. Start the measurement away from the cable, hold still until the baseline is ready, then move the phone close to the insulated cable.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
-                    Text("A charger cable can produce little measurable external field because its paired conductors partly cancel. The requested update interval is not the actual sample rate; use the rate above. Changing the request to 80 Hz can reduce synchronization with 50 Hz mains in some devices, but cannot reconstruct a true AC RMS waveform.")
+                    Text("The main signal now uses raw CMMagnetometerData, while Core Motion accuracy is displayed only as auxiliary metadata. A charger cable can still produce little external field because its paired conductors partly cancel. The requested update interval is not the actual sample rate; use the rate above. The 80 Hz request may reduce synchronization with 50 Hz mains in some devices, but cannot reconstruct a true AC RMS waveform.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
