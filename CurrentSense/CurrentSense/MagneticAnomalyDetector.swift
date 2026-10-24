@@ -14,6 +14,19 @@ struct MagneticFieldVector {
         let dz = z - other.z
         return sqrt(dx * dx + dy * dy + dz * dz)
     }
+
+    /// Rotate a device-coordinate vector into Core Motion's reference frame.
+    func rotated(
+        m11: Double, m12: Double, m13: Double,
+        m21: Double, m22: Double, m23: Double,
+        m31: Double, m32: Double, m33: Double
+    ) -> MagneticFieldVector {
+        MagneticFieldVector(
+            x: x * m11 + y * m12 + z * m13,
+            y: x * m21 + y * m22 + z * m23,
+            z: x * m31 + y * m32 + z * m33
+        )
+    }
 }
 
 /// Detects sustained changes in a stable reference-frame magnetic vector.
@@ -45,10 +58,13 @@ struct MagneticAnomalyDetector {
             y: Self.median(valid.map(\.y)),
             z: Self.median(valid.map(\.z))
         )
-        let residuals = valid.map { $0.distance(to: center) }
+        let sigmaX = 1.4826 * Self.median(valid.map { abs($0.x - center.x) })
+        let sigmaY = 1.4826 * Self.median(valid.map { abs($0.y - center.y) })
+        let sigmaZ = 1.4826 * Self.median(valid.map { abs($0.z - center.z) })
         baselineVector = center
-        // Robust noise estimate; the hard floor avoids reacting to tiny numerical changes.
-        noiseSigmaEstimate = 1.4826 * Self.median(residuals)
+        // Estimate each component's noise with MAD, then combine the three axes.
+        // The detector's hard floor avoids reacting to tiny numerical changes.
+        noiseSigmaEstimate = sqrt(sigmaX * sigmaX + sigmaY * sigmaY + sigmaZ * sigmaZ)
         isDetected = false
         aboveThresholdCount = 0
         belowReleaseCount = 0
