@@ -344,7 +344,7 @@ private struct FieldOrb: View {
                                                      startPoint: .topLeading, endPoint: .bottomTrailing))
                             .mask(Circle().stroke(lineWidth: side * 0.055))
                     }
-                    .shadow(color: tint.opacity(0.28 + intensity * 0.28), radius: 25 + intensity * 20, y: 8)
+                    .shadow(color: tint.opacity(0.28 + intensity * 0.28), radius: 25 + CGFloat(intensity) * 20, y: 8)
                     .scaleEffect(isMeasuring ? (pulse ? 1.0 + intensity * 0.025 : 0.975) : 1)
                     .rotationEffect(.degrees(isMeasuring ? (pulse ? 3.5 : -3.5) : 0))
 
@@ -361,9 +361,9 @@ private struct FieldOrb: View {
                 Circle()
                     .fill(RadialGradient(colors: [.white.opacity(0.95), tint, tint.opacity(0.05)],
                                          center: .center, startRadius: 0, endRadius: side * 0.09))
-                    .frame(width: side * (0.035 + intensity * 0.025),
-                           height: side * (0.035 + intensity * 0.025))
-                    .shadow(color: tint, radius: 16 + intensity * 18)
+                    .frame(width: side * (0.035 + CGFloat(intensity) * 0.025),
+                           height: side * (0.035 + CGFloat(intensity) * 0.025))
+                    .shadow(color: tint, radius: 16 + CGFloat(intensity) * 18)
 
                 if !isMeasuring {
                     Image(systemName: "play.fill")
