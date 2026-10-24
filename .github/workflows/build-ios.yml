@@ -17,7 +17,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Run magnetic anomaly detector regression tests
         run: |
@@ -75,7 +75,7 @@ jobs:
           grep -Fxq "Payload/CurrentSense.app/$EXECUTABLE" "$RUNNER_TEMP/ipa-entries.txt"
 
       - name: Upload unsigned IPA artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: CurrentSense-unsigned-IPA
           path: CurrentSense-unsigned.ipa
