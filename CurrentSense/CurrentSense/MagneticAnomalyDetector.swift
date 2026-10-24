@@ -123,3 +123,43 @@ struct MagneticAnomalyDetector {
         return sorted[middle]
     }
 }
+
+
+/// Median-window filter with exponential smoothing for noisy field-change readings.
+/// Keeps raw samples available for diagnostics while presenting a steadier value to the UI.
+struct FieldDeltaFilter {
+    private var window: [Double] = []
+    private var smoothedValue: Double?
+    private let windowSize: Int
+    private let smoothingFactor: Double
+
+    init(windowSize: Int = 7, smoothingFactor: Double = 0.40) {
+        self.windowSize = max(1, windowSize)
+        self.smoothingFactor = min(max(smoothingFactor, 0.01), 1.0)
+    }
+
+    mutating func update(_ rawValue: Double?) -> Double? {
+        guard let rawValue, rawValue.isFinite, rawValue >= 0 else {
+            reset()
+            return nil
+        }
+
+        window.append(rawValue)
+        if window.count > windowSize {
+            window.removeFirst(window.count - windowSize)
+        }
+
+        let robustValue = MagneticAnomalyDetector.median(window)
+        if let previous = smoothedValue {
+            smoothedValue = previous + (robustValue - previous) * smoothingFactor
+        } else {
+            smoothedValue = robustValue
+        }
+        return smoothedValue
+    }
+
+    mutating func reset() {
+        window.removeAll(keepingCapacity: true)
+        smoothedValue = nil
+    }
+}
