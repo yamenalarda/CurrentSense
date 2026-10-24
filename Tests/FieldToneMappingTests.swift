@@ -38,6 +38,17 @@ struct FieldToneMappingTests {
         expect((minimum ?? 0) >= 0.5 && (maximum ?? 0) <= 2.0,
                "playback rate must stay inside the intended audible range")
 
+        let adaptiveMinimum = FieldToneMapping.rate(
+            forFieldChangeMicrotesla: 2.5,
+            activationThresholdMicrotesla: 2.5
+        )
+        expect(adaptiveMinimum == FieldToneMapping.minimumPlaybackRate,
+               "noise-adjusted threshold should map to the lowest tone")
+        expect(FieldToneMapping.rate(
+            forFieldChangeMicrotesla: 1.0,
+            activationThresholdMicrotesla: 2.5
+        ) == nil, "tone should stay off while the signal is below the noise threshold")
+
         print("PASS: FieldToneMappingTests")
     }
 }
