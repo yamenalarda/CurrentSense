@@ -103,8 +103,146 @@ struct ContentView: View {
     // In standby, the detector is communicated solely through the small orb's appearance.
     private var fieldMagnitude: Double? {
         guard sensor.isRunning else { return nil }
+        if mode == .dc {
+            // A 15-point rolling median reduces the effect of isolated spikes in DC estimates.
+            let window = sensor.samples.suffix(15)
+                .compactMap(\.filteredDeltaMagnitude)
+                .filter { $0.isFinite && $0 >= 0 }
+            guard window.count >= 7 else { return nil }
+            return MagneticAnomalyDetector.median(window)
+        }
         return sensor.latestSample?.filteredDeltaMagnitude
     }
+
+    private var acScanLevel: ACFieldActivityLevel {
+        ACFieldScanClassifier.classify(
+            fieldChangeMicrotesla: fieldMagnitude,
+            noiseSigmaMicrotesla: sensor.baselineNoiseSigmaMicrotesla,
+            isMeasuring: sensor.isRunning,
+            baselineCaptured: sensor.baselineCaptured
+        )
+    }
+
+    private var acScanColor: Color {
+        switch acScanLevel {
+        case .weak: return .yellow
+        case .moderate: return .orange
+        case .strong: return .red
+        case .capturingBaseline: return .yellow
+        case .unavailable: return .gray
+        case .idle, .noDetectableChange:
+            return colorScheme == .dark ? .white.opacity(0.45) : .black.opacity(0.40)
+        }
+    }
+
+    private var measurementPanel: some View {
+        Group {
+            if mode == .ac { acFieldScanPanel } else { measurementBar }
+        }
+    }
+
+    private var acFieldScanPanel: some View {
+        let level = acScanLevel
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("AC FIELD SCAN")
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .tracking(1.2)
+                        .foregroundStyle(mutedTextColor)
+                    Text(level.title)
+                        .font(.system(size: 18, weight: .semibold, design: .rounded))
+                        .foregroundStyle(primaryTextColor)
+                        .contentTransition(.opacity)
+                }
+                Spacer(minLength: 4)
+                Image(systemName: level.indicatesMagneticChange ? "waveform.path" : "waveform")
+                    .font(.system(size: 25, weight: .medium))
+                    .foregroundStyle(acScanColor)
+                    .frame(width: 48, height: 48)
+                    .background(acScanColor.opacity(colorScheme == .dark ? 0.13 : 0.10), in: Circle())
+                    .overlay(Circle().stroke(acScanColor.opacity(0.35), lineWidth: 1))
+            }
+
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("FIELD RESPONSE")
+                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .tracking(0.8)
+                        .foregroundStyle(mutedTextColor)
+                    HStack(spacing: 5) {
+                        ForEach(1...3, id: \.self) { step in
+                            Capsule()
+                                .fill(step <= level.strengthBars
+                                      ? acScanColor
+                                      : (colorScheme == .dark
+                                         ? Color.white.opacity(0.12)
+                                         : Color.black.opacity(0.10)))
+                                .frame(height: 7)
+                        }
+                    }
+                    Text(level.indicatesMagneticChange ? "Signal above threshold" : "Below detection threshold")
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundStyle(acScanColor)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Rectangle()
+                    .fill(colorScheme == .dark ? .white.opacity(0.14) : .black.opacity(0.10))
+                    .frame(width: 1, height: 46)
+
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("RELATIVE REACH")
+                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .tracking(0.8)
+                        .foregroundStyle(mutedTextColor)
+                    Text(level.relativeReachTitle)
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        .foregroundStyle(primaryTextColor)
+                    Text("Field-only")
+                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                        .foregroundStyle(secondaryTextColor)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            Text("Relative response only. Actual reach depends on current, cable geometry, orientation and phone position.")
+                .font(.system(size: 10, weight: .regular, design: .rounded))
+                .foregroundStyle(secondaryTextColor)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Not an NCV voltage tester. No detected field does not mean voltage is absent.")
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .foregroundStyle(colorScheme == .dark ? Color.orange.opacity(0.95) : Color.orange)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.vertical, 16)
+        .padding(.horizontal, 16)
+        .background {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .fill(LinearGradient(
+                            colors: colorScheme == .dark
+                                ? [Color.black.opacity(0.54), Color.white.opacity(0.025)]
+                                : [.white.opacity(0.72), .white.opacity(0.18)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        ))
+                }
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(LinearGradient(
+                    colors: colorScheme == .dark
+                        ? [.white.opacity(0.25), .white.opacity(0.05)]
+                        : [.white.opacity(0.90), .black.opacity(0.07)],
+                    startPoint: .topLeading, endPoint: .bottomTrailing
+                ), lineWidth: 1)
+        }
+        .shadow(color: acScanColor.opacity(0.10), radius: 18, y: 7)
+        .animation(.easeInOut(duration: 0.25), value: level)
+    }
+
     private var fieldColor: Color { FieldPalette.color(for: fieldMagnitude ?? 0) }
 
     private func formattedCurrent(_ value: Double) -> String {
@@ -221,7 +359,7 @@ struct ContentView: View {
                 measurementOrb(in: geometry)
                 measurementInstructions
                 Spacer(minLength: 16)
-                measurementBar
+                measurementPanel
                     .padding(.horizontal, 18)
                     .padding(.bottom, max(geometry.safeAreaInsets.bottom == 0 ? 14 : 8, 8))
             }
