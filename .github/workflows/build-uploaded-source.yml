@@ -1,16 +1,17 @@
-name: Build uploaded CurrentSense source (iOS IPA)
+name: Build CurrentSense iOS (source ZIP or repository fallback)
 
 on:
+  workflow_dispatch:
   push:
     paths:
       - "CurrentSense-source.zip"
-  workflow_dispatch:
+      - ".github/workflows/build-uploaded-source.yml"
 
 permissions:
   contents: read
 
 concurrency:
-  group: uploaded-source-build-${{ github.ref }}
+  group: currentsense-ios-build-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -22,30 +23,33 @@ jobs:
       BUNDLE_ID: "com.currentsense.app"
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
-      - name: Verify archive is present
+      - name: Detect source input
         shell: bash
         run: |
           set -euo pipefail
-          if [[ ! -s CurrentSense-source.zip ]]; then
-            echo "::error title=Missing source archive::CurrentSense-source.zip is not committed at the repository root."
-            echo "Download the ZIP attachment, upload it to the repository root, and commit the upload."
-            echo "Attaching a file to a chat does not add it to the GitHub repository."
-            exit 1
+          if [[ -s "$GITHUB_WORKSPACE/CurrentSense-source.zip" ]]; then
+            echo "SOURCE_MODE=uploaded" >> "$GITHUB_ENV"
+            echo "Found CurrentSense-source.zip; building the uploaded project."
+            unzip -t "$GITHUB_WORKSPACE/CurrentSense-source.zip" | tail -n 2
+          else
+            echo "SOURCE_MODE=repository-fallback" >> "$GITHUB_ENV"
+            echo "::warning title=Source ZIP absent::CurrentSense-source.zip is not committed. Building the existing checked-in CurrentSense project instead, so this run can still produce an IPA."
+            test -f "$GITHUB_WORKSPACE/CurrentSense/CurrentSense.xcodeproj/project.pbxproj"
           fi
-          unzip -t CurrentSense-source.zip | tail -n 2
 
       - name: Record Apple toolchain
         shell: bash
         run: |
           set -euo pipefail
+          xcode-select -p
           xcodebuild -version
           swift --version
           sw_vers
-          xcrun simctl list runtimes | head -n 25
 
       - name: Extract uploaded project
+        if: env.SOURCE_MODE == 'uploaded'
         shell: bash
         run: |
           set -euo pipefail
@@ -59,7 +63,8 @@ jobs:
           chmod +x "$SOURCE_DIR"/scripts/*.sh
           echo "SOURCE_DIR=$SOURCE_DIR" >> "$GITHUB_ENV"
 
-      - name: Install XcodeGen
+      - name: Install XcodeGen for uploaded project
+        if: env.SOURCE_MODE == 'uploaded'
         shell: bash
         run: |
           set -euo pipefail
@@ -68,7 +73,8 @@ jobs:
           fi
           xcodegen --version
 
-      - name: Run core unit and regression tests
+      - name: Run uploaded source core tests
+        if: env.SOURCE_MODE == 'uploaded'
         shell: bash
         run: |
           set -euo pipefail
@@ -76,7 +82,25 @@ jobs:
           cd "$SOURCE_DIR/Packages/CurrentSenseCore"
           swift test 2>&1 | tee "$RUNNER_TEMP/currentsense-logs/swift-test.log"
 
-      - name: Generate Xcode project
+      - name: Run checked-in source regression tests
+        if: env.SOURCE_MODE == 'repository-fallback'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/currentsense-logs"
+          {
+            swiftc CurrentSense/CurrentSense/MagneticAnomalyDetector.swift Tests/MagneticAnomalyDetectorTests.swift -o "$RUNNER_TEMP/MagneticAnomalyDetectorTests"
+            "$RUNNER_TEMP/MagneticAnomalyDetectorTests"
+            swiftc CurrentSense/CurrentSense/CurrentEstimateCalculator.swift Tests/CurrentEstimateCalculatorTests.swift -o "$RUNNER_TEMP/CurrentEstimateCalculatorTests"
+            "$RUNNER_TEMP/CurrentEstimateCalculatorTests"
+            swiftc CurrentSense/CurrentSense/FieldToneMapping.swift Tests/FieldToneMappingTests.swift -o "$RUNNER_TEMP/FieldToneMappingTests"
+            "$RUNNER_TEMP/FieldToneMappingTests"
+            swiftc CurrentSense/CurrentSense/ACFieldScanClassifier.swift Tests/ACFieldScanClassifierTests.swift -o "$RUNNER_TEMP/ACFieldScanClassifierTests"
+            "$RUNNER_TEMP/ACFieldScanClassifierTests"
+          } 2>&1 | tee "$RUNNER_TEMP/currentsense-logs/swift-test.log"
+
+      - name: Generate uploaded Xcode project
+        if: env.SOURCE_MODE == 'uploaded'
         shell: bash
         run: |
           set -euo pipefail
@@ -84,7 +108,15 @@ jobs:
           xcodegen generate
           xcodebuild -list -project CurrentSense.xcodeproj
 
-      - name: Run UI tests on iPhone simulator
+      - name: Verify checked-in Xcode project
+        if: env.SOURCE_MODE == 'repository-fallback'
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -list -project CurrentSense/CurrentSense.xcodeproj
+
+      - name: Run uploaded project UI tests on iPhone simulator
+        if: env.SOURCE_MODE == 'uploaded'
         shell: bash
         run: |
           set -euo pipefail
@@ -101,29 +133,60 @@ jobs:
             CS_SOURCE_REVISION="$GITHUB_SHA" \
             2>&1 | tee "$RUNNER_TEMP/currentsense-logs/ui-tests.log" | tail -n 80
 
-      - name: Archive iPhone Release build and package IPA
+      - name: Build, package, and verify iPhone IPA
         shell: bash
         run: |
           set -euo pipefail
-          cd "$SOURCE_DIR"
-          mkdir -p build
+          mkdir -p "$RUNNER_TEMP/currentsense-logs" "$RUNNER_TEMP/currentsense-release"
           SHORT_SHA="${GITHUB_SHA:0:7}"
-          IPA="build/CurrentSense-${MARKETING_VERSION}-b${GITHUB_RUN_NUMBER}-${SHORT_SHA}-unsigned.ipa"
-          xcodebuild archive \
-            -project CurrentSense.xcodeproj \
-            -scheme CurrentSense \
-            -configuration Release \
-            -destination 'generic/platform=iOS' \
-            -archivePath build/CurrentSense.xcarchive \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
-            MARKETING_VERSION="$MARKETING_VERSION" \
-            CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
-            CS_SOURCE_REVISION="$GITHUB_SHA" \
-            2>&1 | tee "$RUNNER_TEMP/currentsense-logs/archive.log" | tail -n 80
-          scripts/package_ipa.sh build/CurrentSense.xcarchive "$IPA"
-          scripts/verify_ipa.sh "$IPA" "$BUNDLE_ID" "$GITHUB_RUN_NUMBER" "$GITHUB_SHA" \
-            | tee "$RUNNER_TEMP/currentsense-logs/ipa-verify.log"
-          echo "IPA_PATH=$SOURCE_DIR/$IPA" >> "$GITHUB_ENV"
+          if [[ "$SOURCE_MODE" == "uploaded" ]]; then
+            cd "$SOURCE_DIR"
+            IPA="$RUNNER_TEMP/currentsense-release/CurrentSense-${MARKETING_VERSION}-b${GITHUB_RUN_NUMBER}-${SHORT_SHA}-unsigned.ipa"
+            xcodebuild archive \
+              -project CurrentSense.xcodeproj \
+              -scheme CurrentSense \
+              -configuration Release \
+              -destination 'generic/platform=iOS' \
+              -archivePath build/CurrentSense.xcarchive \
+              CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+              MARKETING_VERSION="$MARKETING_VERSION" \
+              CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
+              CS_SOURCE_REVISION="$GITHUB_SHA" \
+              2>&1 | tee "$RUNNER_TEMP/currentsense-logs/archive.log" | tail -n 80
+            scripts/package_ipa.sh build/CurrentSense.xcarchive "$IPA"
+            scripts/verify_ipa.sh "$IPA" "$BUNDLE_ID" "$GITHUB_RUN_NUMBER" "$GITHUB_SHA" \
+              | tee "$RUNNER_TEMP/currentsense-logs/ipa-verify.log"
+          else
+            APP_PATH="$RUNNER_TEMP/CurrentSenseDerivedData/Build/Products/Release-iphoneos/CurrentSense.app"
+            IPA="$RUNNER_TEMP/currentsense-release/CurrentSense-repository-fallback-b${GITHUB_RUN_NUMBER}-${SHORT_SHA}-unsigned.ipa"
+            xcodebuild \
+              -project CurrentSense/CurrentSense.xcodeproj \
+              -scheme CurrentSense \
+              -configuration Release \
+              -sdk iphoneos \
+              -destination 'generic/platform=iOS' \
+              -derivedDataPath "$RUNNER_TEMP/CurrentSenseDerivedData" \
+              MARKETING_VERSION=0.3.0 \
+              CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
+              CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+              build 2>&1 | tee "$RUNNER_TEMP/currentsense-logs/archive.log" | tail -n 80
+            test -d "$APP_PATH"
+            mkdir -p "$RUNNER_TEMP/ipa/Payload"
+            cp -R "$APP_PATH" "$RUNNER_TEMP/ipa/Payload/CurrentSense.app"
+            (cd "$RUNNER_TEMP/ipa" && /usr/bin/zip -qry "$IPA" Payload)
+            unzip -t "$IPA" | tee "$RUNNER_TEMP/currentsense-logs/ipa-verify.log"
+            unzip -Z1 "$IPA" > "$RUNNER_TEMP/ipa-entries.txt"
+            grep -Fxq "Payload/CurrentSense.app/Info.plist" "$RUNNER_TEMP/ipa-entries.txt"
+            EXECUTABLE=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$APP_PATH/Info.plist")
+            PACKAGE_TYPE=$(/usr/libexec/PlistBuddy -c "Print :CFBundlePackageType" "$APP_PATH/Info.plist")
+            test "$PACKAGE_TYPE" = "APPL"
+            test -n "$EXECUTABLE"
+            test -x "$APP_PATH/$EXECUTABLE"
+            grep -Fxq "Payload/CurrentSense.app/$EXECUTABLE" "$RUNNER_TEMP/ipa-entries.txt"
+            echo "Verified IPA structure. Source mode: repository fallback (committed source, not the missing ZIP)."
+          fi
+          test -s "$IPA"
+          echo "IPA_PATH=$IPA" >> "$GITHUB_ENV"
 
       - name: Write build report
         if: always()
@@ -132,28 +195,23 @@ jobs:
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/currentsense-report"
           {
-            echo "# CurrentSense iOS build report"
-            echo
-            echo "- Repository: \`$GITHUB_REPOSITORY\`"
-            echo "- Commit: \`$GITHUB_SHA\`"
-            echo "- Workflow run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-            echo "- Version/build: $MARKETING_VERSION / $GITHUB_RUN_NUMBER"
-            echo "- Signing: unsigned; must be signed before installing on a physical iPhone"
-            echo "- Physical iPhone sensor validation: not performed by CI"
-            echo
-            if [ -f "$RUNNER_TEMP/currentsense-logs/swift-test.log" ]; then
-              echo "## Core tests"
-              grep -E 'Executed [0-9]+ tests|Test Suite .* (passed|failed)' "$RUNNER_TEMP/currentsense-logs/swift-test.log" | tail -n 10 || true
+            printf '# CurrentSense iOS build report\n\n'
+            printf -- '- Source mode: %s\n' "${SOURCE_MODE:-unknown}"
+            printf -- '- Repository: %s\n' "$GITHUB_REPOSITORY"
+            printf -- '- Commit: %s\n' "$GITHUB_SHA"
+            printf -- '- Workflow run: %s/%s/actions/runs/%s\n' "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"
+            printf -- '- Signing: unsigned; a valid signing identity and provisioning profile are required for installation on a physical iPhone.\n'
+            if [[ "${SOURCE_MODE:-}" == "repository-fallback" ]]; then
+              printf '\n**Important:** the uploaded source ZIP was absent; this artifact was built from the source already committed in the repository.\n'
             fi
-            if [ -f "$RUNNER_TEMP/currentsense-logs/ui-tests.log" ]; then
-              echo
-              echo "## UI tests"
-              grep -E 'Executed [0-9]+ tests|TEST (SUCCEEDED|FAILED)' "$RUNNER_TEMP/currentsense-logs/ui-tests.log" | tail -n 10 || true
+            printf -- '\n- Physical iPhone sensor validation: not performed by CI.\n'
+            if [[ -f "$RUNNER_TEMP/currentsense-logs/swift-test.log" ]]; then
+              printf '\n## Test log summary\n\n'
+              tail -n 25 "$RUNNER_TEMP/currentsense-logs/swift-test.log"
             fi
-            if [ -f "$RUNNER_TEMP/currentsense-logs/ipa-verify.log" ]; then
-              echo
-              echo "## IPA verification"
-              cat "$RUNNER_TEMP/currentsense-logs/ipa-verify.log"
+            if [[ -f "$RUNNER_TEMP/currentsense-logs/ipa-verify.log" ]]; then
+              printf '\n## IPA verification\n\n'
+              tail -n 20 "$RUNNER_TEMP/currentsense-logs/ipa-verify.log"
             fi
           } > "$RUNNER_TEMP/currentsense-report/release-report.md"
 
@@ -163,7 +221,7 @@ jobs:
         with:
           name: CurrentSense-iPhone-unsigned-IPA-b${{ github.run_number }}
           path: |
-            ${{ runner.temp }}/currentsense-unpacked/CurrentSense/build/*.ipa
+            ${{ runner.temp }}/currentsense-release/*.ipa
             ${{ runner.temp }}/currentsense-report/release-report.md
           if-no-files-found: error
           retention-days: 14
