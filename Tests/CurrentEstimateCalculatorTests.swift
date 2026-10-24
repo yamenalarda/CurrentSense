@@ -129,6 +129,19 @@ struct CurrentEstimateCalculatorTests {
         )
         expect(invalidSensitivity.currentAmperes == nil, "NaN sensitivity must be rejected")
 
+        let noisyBaseline = CurrentEstimateCalculator.evaluate(
+            fieldChangeMicrotesla: 1.1,
+            isAC: false,
+            conductor: .singleConductor,
+            reference: .knownDistanceCentimeters(1),
+            sensorCalibrationQuality: "High",
+            baselineNoiseSigmaMicrotesla: 0.25
+        )
+        expect(noisyBaseline.currentAmperes == nil,
+               "field signal below five times measured baseline noise must be rejected")
+        expect(noisyBaseline.caution?.contains("1.250 µT") == true,
+               "adaptive noise threshold must be visible in the warning")
+
         let lowCalibration = CurrentEstimateCalculator.evaluate(
             fieldChangeMicrotesla: 20,
             isAC: false,
