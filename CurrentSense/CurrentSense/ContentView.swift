@@ -569,20 +569,20 @@ private struct FieldOrb: View {
                     .overlay {
                         Circle().fill(
                             LinearGradient(colors: [
-                                .white.opacity(0.26),
-                                tint.opacity(0.10),
-                                .white.opacity(0.025),
-                                tint.opacity(0.18)
+                                .white.opacity(0.12),
+                                tint.opacity(0.045),
+                                .white.opacity(0.015),
+                                tint.opacity(0.07)
                             ], startPoint: .topLeading, endPoint: .bottomTrailing)
                         )
                     }
                     .overlay {
                         Circle().stroke(
                             LinearGradient(colors: [
-                                .white.opacity(0.92),
-                                .white.opacity(0.16),
-                                tint.opacity(0.68),
-                                .white.opacity(0.42)
+                                .white.opacity(0.82),
+                                .white.opacity(0.09),
+                                tint.opacity(0.42),
+                                .white.opacity(0.30)
                             ], startPoint: .topLeading, endPoint: .bottomTrailing),
                             lineWidth: 1.4
                         )
@@ -598,12 +598,12 @@ private struct FieldOrb: View {
                 Circle()
                     .fill(
                         AngularGradient(stops: [
-                            .init(color: FieldPalette.color(for: magnitude * 0.18).opacity(0.58), location: 0.00),
-                            .init(color: FieldPalette.color(for: magnitude * 0.42).opacity(0.78), location: 0.18),
-                            .init(color: FieldPalette.color(for: magnitude * 0.68).opacity(0.70), location: 0.38),
-                            .init(color: FieldPalette.color(for: magnitude).opacity(0.84), location: 0.60),
-                            .init(color: FieldPalette.color(for: magnitude * 0.35).opacity(0.62), location: 0.82),
-                            .init(color: FieldPalette.color(for: magnitude * 0.18).opacity(0.58), location: 1.00)
+                            .init(color: FieldPalette.color(for: magnitude * 0.18).opacity(0.16), location: 0.00),
+                            .init(color: FieldPalette.color(for: magnitude * 0.42).opacity(0.26), location: 0.18),
+                            .init(color: FieldPalette.color(for: magnitude * 0.68).opacity(0.22), location: 0.38),
+                            .init(color: FieldPalette.color(for: magnitude).opacity(0.34), location: 0.60),
+                            .init(color: FieldPalette.color(for: magnitude * 0.35).opacity(0.20), location: 0.82),
+                            .init(color: FieldPalette.color(for: magnitude * 0.18).opacity(0.16), location: 1.00)
                         ], center: .center, startAngle: .degrees(drift ? 25 : -25),
                            endAngle: .degrees(drift ? 385 : 335))
                     )
@@ -615,9 +615,9 @@ private struct FieldOrb: View {
                 // Soft translucent blobs give the orb the reference's glassy depth.
                 Ellipse()
                     .fill(LinearGradient(colors: [
-                        .white.opacity(0.52),
-                        .white.opacity(0.08),
-                        tint.opacity(0.10)
+                        .white.opacity(0.34),
+                        .white.opacity(0.045),
+                        tint.opacity(0.06)
                     ], startPoint: .topLeading, endPoint: .bottomTrailing))
                     .frame(width: side * 0.60, height: side * 0.25)
                     .blur(radius: side * 0.018)
@@ -627,8 +627,8 @@ private struct FieldOrb: View {
 
                 Circle()
                     .fill(RadialGradient(colors: [
-                        .white.opacity(0.30),
-                        .white.opacity(0.07),
+                        .white.opacity(0.18),
+                        .white.opacity(0.035),
                         .clear
                     ], center: .topLeading, startRadius: 0, endRadius: side * 0.72))
                     .padding(side * 0.035)
@@ -877,6 +877,52 @@ private struct CalculationSettingsView: View {
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
+                }
+
+                Section("Live sensor diagnostics") {
+                    HStack {
+                        Text("Baseline")
+                        Spacer()
+                        Text(sensor.baselineCaptured
+                             ? "Ready"
+                             : (sensor.isRunning ? "Capturing" : "Not captured"))
+                            .foregroundStyle(.secondary)
+                    }
+                    HStack {
+                        Text("Sensor calibration")
+                        Spacer()
+                        Text(sensor.calibrationQuality)
+                            .foregroundStyle(sensor.calibrationQuality == "High"
+                                ? .primary : .orange)
+                    }
+                    HStack {
+                        Text("Total calibrated field")
+                        Spacer()
+                        Text(sensor.latestSample.map {
+                            String(format: "%.2f µT", $0.magnitude)
+                        } ?? "—")
+                            .monospacedDigit()
+                    }
+                    HStack {
+                        Text("Change from baseline")
+                        Spacer()
+                        Text(sensor.latestSample?.deltaMagnitude.map {
+                            String(format: "%.3f µT", $0)
+                        } ?? "—")
+                            .monospacedDigit()
+                    }
+                    if let sample = sensor.latestSample {
+                        Text(String(format: "Device axes  X %.2f  Y %.2f  Z %.2f µT",
+                                    sample.x, sample.y, sample.z))
+                            .font(.footnote.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                    Text("Zero change means the sensor sees little difference from its captured baseline; it does not prove that current is zero. Start the measurement away from the cable, hold still until the baseline is ready, then move the phone close to the insulated cable.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Text("A charger cable can produce little measurable external field because its paired conductors partly cancel. Core Motion's delivered update interval is not a guarantee that the sensor resolves 50/60 Hz current or its RMS value.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
 
                 Section("Measurement limits") {
