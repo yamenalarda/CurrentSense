@@ -102,7 +102,8 @@ struct ContentView: View {
 
                     FieldOrb(isMeasuring: sensor.isRunning,
                              magnitude: fieldMagnitude ?? 0,
-                             tint: fieldColor)
+                             tint: fieldColor,
+                             proximitySignal: sensor.magneticSourceDetected)
                         .frame(
                             width: sensor.isRunning
                                 ? min(geometry.size.width * 0.86, geometry.size.height * 0.48)
@@ -186,7 +187,8 @@ struct ContentView: View {
         .animation(.spring(response: 0.42, dampingFraction: 0.78), value: sensor.isRunning)
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: mode)
         .animation(.spring(response: 0.45, dampingFraction: 0.76), value: fieldMagnitude)
-        .onDisappear { sensor.stop() }
+        .onAppear { sensor.startMonitoring() }
+        .onDisappear { sensor.stopMonitoring() }
     }
 
     private var ambientGlow: some View {
@@ -347,8 +349,9 @@ private struct FieldOrb: View {
     let isMeasuring: Bool
     let magnitude: Double
     let tint: Color
+    let proximitySignal: Bool
     @State private var drift = false
-    @State private var pressed = false
+    @State private var detectionPulse = false
 
     // Map measured field strength to a simulation-style spectrum:
     // blue -> cyan -> green -> yellow -> orange -> red.
@@ -357,7 +360,26 @@ private struct FieldOrb: View {
     var body: some View {
         GeometryReader { proxy in
             let side = min(proxy.size.width, proxy.size.height)
+            let detectionTint = Color(red: 1.0, green: 0.57, blue: 0.16)
             ZStack {
+                // Quiet standby feedback: only the orb changes, with no status text.
+                if !isMeasuring && proximitySignal {
+                    Circle()
+                        .fill(RadialGradient(
+                            colors: [
+                                detectionTint.opacity(detectionPulse ? 0.34 : 0.12),
+                                detectionTint.opacity(0.06),
+                                .clear
+                            ],
+                            center: .center,
+                            startRadius: side * 0.12,
+                            endRadius: side * 0.70
+                        ))
+                        .frame(width: side * 1.30, height: side * 1.30)
+                        .blur(radius: side * 0.04)
+                        .allowsHitTesting(false)
+                }
+
                 // Soft colored bloom behind the glass disc.
                 Circle()
                     .fill(RadialGradient(colors: [
@@ -439,6 +461,28 @@ private struct FieldOrb: View {
                     ], center: .topLeading, startRadius: 0, endRadius: side * 0.72))
                     .padding(side * 0.035)
 
+                // The idle orb signals a sustained magnetic change using only its rim.
+                if !isMeasuring && proximitySignal {
+                    Circle()
+                        .stroke(
+                            LinearGradient(
+                                colors: [
+                                    detectionTint.opacity(detectionPulse ? 1.0 : 0.40),
+                                    .white.opacity(detectionPulse ? 0.72 : 0.24),
+                                    detectionTint.opacity(detectionPulse ? 0.82 : 0.32)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: detectionPulse ? 2.8 : 1.4
+                        )
+                        .padding(side * 0.012)
+                        .shadow(color: detectionTint.opacity(detectionPulse ? 0.72 : 0.24),
+                                radius: detectionPulse ? 14 : 5)
+                        .scaleEffect(detectionPulse ? 1.025 : 0.985)
+                        .allowsHitTesting(false)
+                }
+
                 // Fine inner rim and a subtle refracted highlight.
                 Circle()
                     .stroke(.white.opacity(0.35), lineWidth: 0.8)
@@ -466,9 +510,26 @@ private struct FieldOrb: View {
             .frame(width: side, height: side)
             .contentShape(Circle())
             .onAppear {
-                guard isMeasuring else { return }
-                withAnimation(.easeInOut(duration: 2.1).repeatForever(autoreverses: true)) {
-                    drift = true
+                if isMeasuring {
+                    withAnimation(.easeInOut(duration: 2.1).repeatForever(autoreverses: true)) {
+                        drift = true
+                    }
+                }
+                if proximitySignal && !isMeasuring {
+                    withAnimation(.easeInOut(duration: 1.15).repeatForever(autoreverses: true)) {
+                        detectionPulse = true
+                    }
+                }
+            }
+            .onChange(of: proximitySignal) { _, detected in
+                if detected && !isMeasuring {
+                    withAnimation(.easeInOut(duration: 1.15).repeatForever(autoreverses: true)) {
+                        detectionPulse = true
+                    }
+                } else {
+                    withAnimation(.spring(response: 0.4, dampingFraction: 0.78)) {
+                        detectionPulse = false
+                    }
                 }
             }
             .onChange(of: isMeasuring) { _, active in
