@@ -421,10 +421,12 @@ struct ContentView: View {
         VStack(spacing: 8) {
             Text(
                 !sensor.isRunning
-                    ? "Tap the circle to begin"
+                    ? (mode == .ac ? "Tap the circle to start field scan" : "Tap the circle to begin")
                     : (!sensor.baselineCaptured
-                        ? "Capturing baseline — keep iPhone away from cable"
-                        : "Baseline ready — move iPhone near the cable")
+                        ? "Capturing baseline — hold still away from cable"
+                        : (mode == .ac
+                            ? "Scan slowly along the insulated cable"
+                            : "Baseline ready — move phone near the conductor"))
             )
             .font(.system(size: 16, weight: .medium, design: .rounded))
             .foregroundStyle(primaryTextColor)
@@ -433,10 +435,14 @@ struct ContentView: View {
 
             Text(
                 !sensor.isRunning
-                    ? "Start away from the cable and hold still while the baseline is captured."
-                    : (mode == .ac
-                        ? "AC estimates need same-setup calibration and may not represent true RMS."
-                        : "Keep the phone still. Estimate depends on wiring setup and reference.")
+                    ? (mode == .ac
+                        ? "AC shows relative magnetic activity, not voltage or current numbers."
+                        : "Start away from the conductor and hold still while the baseline is captured.")
+                    : (!sensor.baselineCaptured
+                        ? "Keep the phone still until the reference is ready."
+                        : (mode == .ac
+                            ? "Keep the phone still at each point; movement itself can change the field."
+                            : "DC estimates use a rolling median. Keep position and orientation fixed."))
             )
             .font(.system(size: 12, weight: .regular, design: .rounded))
             .foregroundStyle(secondaryTextColor)
@@ -454,11 +460,15 @@ struct ContentView: View {
                     Circle()
                         .fill(sensor.baselineCaptured ? fieldColor : .yellow)
                         .frame(width: 6, height: 6)
-                    Text(sensor.baselineCaptured ? "LIVE FIELD CHANGE" : "CAPTURING BASELINE")
+                    Text(sensor.baselineCaptured
+                         ? (mode == .ac ? acScanLevel.title.uppercased() : "STABLE DC WINDOW")
+                         : "CAPTURING BASELINE")
                         .font(.system(size: 10, weight: .bold, design: .rounded))
-                        .tracking(1.2)
-                        .foregroundStyle(sensor.baselineCaptured ? fieldColor : .yellow)
-                    Text("· CAL \(sensor.calibrationQuality.uppercased())")
+                        .tracking(1.0)
+                        .foregroundStyle(sensor.baselineCaptured
+                                         ? (mode == .ac ? acScanColor : fieldColor)
+                                         : .yellow)
+                    Text("· CAL \\(sensor.calibrationQuality.uppercased())")
                         .font(.system(size: 9, weight: .semibold, design: .rounded))
                         .foregroundStyle(sensor.calibrationQuality == "High"
                             ? (colorScheme == .dark ? .white.opacity(0.72) : .black.opacity(0.65))
@@ -472,7 +482,7 @@ struct ContentView: View {
                 .padding(.top, 2)
             }
 
-            if sensor.isRunning, let caution = estimate.caution {
+            if sensor.isRunning, mode == .dc, let caution = estimate.caution {
                 Text(caution)
                     .font(.system(size: 10, weight: .regular, design: .rounded))
                     .foregroundStyle(colorScheme == .dark ? .white.opacity(0.62) : .black.opacity(0.62))
@@ -598,7 +608,7 @@ struct ContentView: View {
                         : ((fieldMagnitude ?? 0) < sensor.minimumUsableFieldChangeMicrotesla
                             ? String(format: "Below %.3f µT noise threshold",
                                      sensor.minimumUsableFieldChangeMicrotesla)
-                            : "Filtered vs baseline")),
+                            : "1.5 s rolling median")),
                 tint: fieldColor
             )
             separator
@@ -1016,6 +1026,13 @@ private struct CalculationSettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                if isAC {
+                    Section("AC field scan") {
+                        Text("AC mode is qualitative: it classifies the magnetic-field response as none, weak, moderate or strong. It intentionally does not display amperes, centimeters or voltage numbers.")
+                        Text("A real NCV tester senses an electric field. CurrentSense uses the iPhone magnetometer, so it cannot verify that a cable is live or prove that voltage is absent.")
+                        Text("Use a properly rated voltage tester and the correct electrical safety procedure when checking for dangerous voltage.")
+                    }
+                } else {
                 Section("Conductor setup") {
                     Picker("Wiring", selection: $conductorRawValue) {
                         ForEach(ConductorConfiguration.allCases) { item in
@@ -1095,6 +1112,7 @@ private struct CalculationSettingsView: View {
                     }
                 }
 
+                }
                 Section("Live sensor diagnostics") {
                     HStack {
                         Text("Baseline")
@@ -1166,8 +1184,13 @@ private struct CalculationSettingsView: View {
                 }
 
                 Section("Measurement limits") {
-                    Text("One magnetic-field reading cannot independently determine both current and distance. The app calculates one from a supplied reference, or uses a cable-specific sensitivity calibrated against a known current.")
-                    Text("Readings below 0.5 µT, or below five times the measured baseline noise, are treated as too weak. Low or uncalibrated sensor status lowers confidence. These estimates are not a substitute for a clamp meter.")
+                    if isAC {
+                        Text("Field-response bands are relative, not calibrated distances. A stronger field can result from higher current, cable geometry, orientation or phone position—not only from being closer.")
+                        Text("This app is not a safety-rated NCV or voltage detector. A weak or absent response must never be interpreted as safe or de-energized.")
+                    } else {
+                        Text("One magnetic-field reading cannot independently determine both current and distance. The app uses a straight-wire model only for an isolated DC conductor, or a cable-specific sensitivity calibrated against a known current.")
+                        Text("Readings below 0.5 µT, or below five times the measured baseline noise, are treated as too weak. Low or uncalibrated sensor status lowers confidence. Estimates need validation against a clamp meter.")
+                    }
                 }
             }
             .scrollContentBackground(colorScheme == .dark ? .hidden : .visible)
@@ -1190,12 +1213,20 @@ private struct CalculationSettingsView: View {
             calibrationFeedback = "Enter a valid positive reference current."
             return
         }
-        guard sensor.isRunning,
-              sensor.baselineCaptured,
-              let field = sensor.latestSample?.filteredDeltaMagnitude,
-              field.isFinite,
-              field >= sensor.minimumUsableFieldChangeMicrotesla else {
+        guard sensor.isRunning, sensor.baselineCaptured else {
             calibrationFeedback = "Start measurement and wait for a stable field reading."
+            return
+        }
+        let stableWindow = sensor.samples.suffix(15)
+            .compactMap(\\.filteredDeltaMagnitude)
+            .filter { $0.isFinite && $0 >= 0 }
+        guard stableWindow.count >= 7 else {
+            calibrationFeedback = "Hold the phone still to collect a stable 1.5-second window."
+            return
+        }
+        let field = MagneticAnomalyDetector.median(stableWindow)
+        guard field.isFinite, field >= sensor.minimumUsableFieldChangeMicrotesla else {
+            calibrationFeedback = "The signal is below the noise-adjusted calibration threshold."
             return
         }
         let sensitivity = field / referenceAmps
