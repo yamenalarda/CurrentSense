@@ -114,7 +114,6 @@ final class MagnetometerService: ObservableObject {
     }
 
     private let motionManager = CMMotionManager()
-    private let motionSnapshotBuffer = MotionSnapshotBuffer()
     private let queue: OperationQueue = {
         let q = OperationQueue()
         q.name = "CurrentSense.MagnetometerQueue"
@@ -173,7 +172,6 @@ final class MagnetometerService: ObservableObject {
         lastUIPublish = .distantPast
         motionManager.deviceMotionUpdateInterval = standbyUpdateInterval
         motionManager.magnetometerUpdateInterval = standbyUpdateInterval
-        motionSnapshotBuffer.reset()
         startMotionUpdates()
     }
 
@@ -227,7 +225,6 @@ final class MagnetometerService: ObservableObject {
         motionGeneration &+= 1
         motionManager.stopDeviceMotionUpdates()
         motionManager.stopMagnetometerUpdates()
-        motionSnapshotBuffer.reset()
         isRunning = false
         isMonitoring = false
 
@@ -261,7 +258,9 @@ final class MagnetometerService: ObservableObject {
     private func startMotionUpdates() {
         motionGeneration &+= 1
         let generation = motionGeneration
-        let snapshotBuffer = motionSnapshotBuffer
+        // Isolate each sensor session so late callbacks from a stopped session
+        // cannot inject stale attitudes into the current session's matching buffer.
+        let snapshotBuffer = MotionSnapshotBuffer()
         let deliveryMailbox = LatestValueMailbox<ProcessedMotionReading>()
 
         // Core Motion's calibrated stream supplies attitude + a bias-compensated
