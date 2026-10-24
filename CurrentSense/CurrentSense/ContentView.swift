@@ -18,7 +18,7 @@ private enum FieldPalette {
 
     // Simulation-style heat map: low field = blue, high field = red.
     static func color(for magnitude: Double) -> Color {
-        let t = min(max(magnitude / 250.0, 0), 1)
+        let t = min(max(magnitude / 50.0, 0), 1)
         let stops: [(Double, Color)] = [
             (0.00, Color(red: 0.02, green: 0.16, blue: 0.95)),
             (0.20, Color(red: 0.0, green: 0.72, blue: 1.0)),
@@ -256,7 +256,7 @@ struct ContentView: View {
                          tint: .white.opacity(0.65))
             separator
             metricColumn(title: "FIELD CHANGE",
-                         value: fieldMagnitude.map { String(format: "%.2f", $0) } ?? "—",
+                         value: fieldMagnitude.map { String(format: "%.1f", $0) } ?? "—",
                          unit: "µT",
                          detail: sensor.baselineCaptured ? "Relative to baseline" : (sensor.isRunning ? "Capturing baseline" : "Baseline required"),
                          tint: fieldColor)
@@ -342,7 +342,7 @@ private struct FieldOrb: View {
 
     // Map measured field strength to a simulation-style spectrum:
     // blue -> cyan -> green -> yellow -> orange -> red.
-    private var intensity: Double { min(max(magnitude / 250.0, 0.0), 1.0) }
+    private var intensity: Double { min(max(magnitude / 50.0, 0.0), 1.0) }
 
     var body: some View {
         GeometryReader { proxy in
