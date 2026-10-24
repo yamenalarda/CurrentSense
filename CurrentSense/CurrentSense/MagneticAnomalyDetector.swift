@@ -163,3 +163,44 @@ struct FieldDeltaFilter {
         smoothedValue = nil
     }
 }
+
+
+/// Rejects samples taken while the device is rotating quickly. Rotation compensation
+/// reduces orientation errors, but transient Core Motion calibration during fast turns
+/// can still create false field changes. Stability returns only after several calm samples.
+struct OrientationStabilityGate {
+    private(set) var isStable = false
+    private var consecutiveCalmSamples = 0
+
+    private let instabilityRateRadiansPerSecond = 0.35
+    private let recoveryRateRadiansPerSecond = 0.20
+    private let calmSamplesRequired = 4
+
+    @discardableResult
+    mutating func update(rotationRateRadiansPerSecond rate: Double) -> Bool {
+        guard rate.isFinite, rate >= 0 else {
+            consecutiveCalmSamples = 0
+            isStable = false
+            return false
+        }
+
+        if rate >= instabilityRateRadiansPerSecond {
+            consecutiveCalmSamples = 0
+            isStable = false
+        } else if rate <= recoveryRateRadiansPerSecond {
+            consecutiveCalmSamples += 1
+            if consecutiveCalmSamples >= calmSamplesRequired {
+                isStable = true
+            }
+        } else {
+            // Hysteresis band: do not count a moving sample as evidence of recovery.
+            consecutiveCalmSamples = 0
+        }
+        return isStable
+    }
+
+    mutating func reset() {
+        isStable = false
+        consecutiveCalmSamples = 0
+    }
+}
