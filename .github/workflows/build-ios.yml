@@ -35,6 +35,14 @@ jobs:
             -o "$RUNNER_TEMP/CurrentEstimateCalculatorTests"
           "$RUNNER_TEMP/CurrentEstimateCalculatorTests"
 
+      - name: Run current and distance estimate regression tests
+        run: |
+          swiftc \
+            CurrentSense/CurrentSense/CurrentEstimateCalculator.swift \
+            Tests/CurrentEstimateCalculatorTests.swift \
+            -o "$RUNNER_TEMP/CurrentEstimateCalculatorTests"
+          "$RUNNER_TEMP/CurrentEstimateCalculatorTests"
+
       - name: Verify Xcode toolchain and project
         run: |
           xcode-select -p
