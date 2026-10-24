@@ -12,9 +12,9 @@ private enum FieldPalette {
         if scheme == .dark {
             return LinearGradient(
                 colors: [
-                    Color(red: 0.018, green: 0.035, blue: 0.075),
-                    Color(red: 0.035, green: 0.055, blue: 0.12),
-                    Color(red: 0.012, green: 0.02, blue: 0.05)
+                    Color(red: 0.003, green: 0.004, blue: 0.008),
+                    Color(red: 0.010, green: 0.012, blue: 0.020),
+                    Color(red: 0.002, green: 0.002, blue: 0.005)
                 ],
                 startPoint: .topLeading, endPoint: .bottomTrailing
             )
@@ -103,9 +103,16 @@ struct ContentView: View {
     // In standby, the detector is communicated solely through the small orb's appearance.
     private var fieldMagnitude: Double? {
         guard sensor.isRunning else { return nil }
-        return sensor.latestSample?.deltaMagnitude
+        return sensor.latestSample?.filteredDeltaMagnitude
     }
     private var fieldColor: Color { FieldPalette.color(for: fieldMagnitude ?? 0) }
+
+    private func formattedCurrent(_ value: Double) -> String {
+        guard value.isFinite, value >= 0 else { return "—" }
+        if value > 0 && value < 0.0001 { return "<0.0001" }
+        if value < 0.1 { return String(format: "%.3f", value) }
+        return String(format: "%.2f", value)
+    }
 
     private var conductorConfiguration: ConductorConfiguration {
         ConductorConfiguration(rawValue: conductorRawValue) ?? .singleConductor
@@ -141,7 +148,8 @@ struct ContentView: View {
             isAC: mode == .ac,
             conductor: conductorConfiguration,
             reference: estimateReference,
-            sensorCalibrationQuality: sensor.calibrationQuality
+            sensorCalibrationQuality: sensor.calibrationQuality,
+            baselineNoiseSigmaMicrotesla: sensor.baselineNoiseSigmaMicrotesla
         )
     }
 
@@ -221,6 +229,8 @@ struct ContentView: View {
                     .foregroundStyle(primaryTextColor)
                     .frame(width: 42, height: 42)
                     .background(.ultraThinMaterial, in: Circle())
+                    .overlay(Circle().fill(colorScheme == .dark
+                        ? Color.black.opacity(0.40) : Color.white.opacity(0.06)))
                     .overlay(Circle().stroke(
                         colorScheme == .dark ? .white.opacity(0.18) : .black.opacity(0.10),
                         lineWidth: 1
@@ -237,7 +247,8 @@ struct ContentView: View {
             isMeasuring: sensor.isRunning,
             magnitude: fieldMagnitude ?? 0,
             tint: fieldColor,
-            proximitySignal: sensor.magneticSourceDetected
+            proximitySignal: sensor.magneticSourceDetected,
+            colorScheme: colorScheme
         )
         .frame(
             width: sensor.isRunning
@@ -354,12 +365,14 @@ struct ContentView: View {
         GeometryReader { proxy in
             ZStack {
                 Circle()
-                    .fill(fieldColor.opacity(sensor.isRunning ? 0.17 : 0.08))
+                    .fill(fieldColor.opacity(sensor.isRunning
+                        ? (colorScheme == .dark ? 0.10 : 0.17)
+                        : (colorScheme == .dark ? 0.035 : 0.08)))
                     .frame(width: proxy.size.width * 0.95)
                     .blur(radius: 100)
                     .offset(x: -proxy.size.width * 0.25, y: -proxy.size.height * 0.08)
                 Circle()
-                    .fill(Color.blue.opacity(0.12))
+                    .fill(Color.blue.opacity(colorScheme == .dark ? 0.025 : 0.12))
                     .frame(width: proxy.size.width * 0.7)
                     .blur(radius: 90)
                     .offset(x: proxy.size.width * 0.35, y: proxy.size.height * 0.3)
@@ -406,6 +419,8 @@ struct ContentView: View {
         }
         .padding(5)
         .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().fill(colorScheme == .dark
+            ? Color.black.opacity(0.48) : Color.white.opacity(0.08)))
         .overlay(Capsule().stroke(
             colorScheme == .dark ? .white.opacity(0.18) : .black.opacity(0.10),
             lineWidth: 1
@@ -416,7 +431,7 @@ struct ContentView: View {
         HStack(spacing: 0) {
             metricColumn(
                 title: currentMetricTitle,
-                value: estimate.currentAmperes.map { String(format: "%.2f", $0) } ?? "—",
+                value: estimate.currentAmperes.map { formattedCurrent($0) } ?? "—",
                 unit: "A",
                 detail: estimate.currentDetail,
                 tint: estimate.currentAmperes == nil ? secondaryTextColor : fieldColor
@@ -430,10 +445,10 @@ struct ContentView: View {
                     ? "Start measuring"
                     : (!sensor.baselineCaptured
                         ? "Capturing baseline"
-                        : ((fieldMagnitude ?? 0) <
-                            CurrentEstimateCalculator.minimumUsableFieldChangeMicrotesla
-                            ? "Below 0.5 µT threshold"
-                            : "Relative to baseline")),
+                        : ((fieldMagnitude ?? 0) < sensor.minimumUsableFieldChangeMicrotesla
+                            ? String(format: "Below %.3f µT noise threshold",
+                                     sensor.minimumUsableFieldChangeMicrotesla)
+                            : "Filtered vs baseline")),
                 tint: fieldColor
             )
             separator
@@ -454,7 +469,7 @@ struct ContentView: View {
                     RoundedRectangle(cornerRadius: 24, style: .continuous)
                         .fill(LinearGradient(
                             colors: colorScheme == .dark
-                                ? [.white.opacity(0.10), .white.opacity(0.015)]
+                                ? [Color.black.opacity(0.48), Color.white.opacity(0.025)]
                                 : [.white.opacity(0.70), .white.opacity(0.20)],
                             startPoint: .topLeading, endPoint: .bottomTrailing
                         )
@@ -527,6 +542,7 @@ private struct FieldOrb: View {
     let magnitude: Double
     let tint: Color
     let proximitySignal: Bool
+    let colorScheme: ColorScheme
     @State private var drift = false
     @State private var detectionPulse = false
 
@@ -568,6 +584,23 @@ private struct FieldOrb: View {
                     .blur(radius: side * 0.055)
                     .scaleEffect(isMeasuring ? (drift ? 1.08 : 0.94) : 1)
 
+                // Spectral edge reflections create the glossy, holographic glass rim.
+                Circle()
+                    .stroke(
+                        AngularGradient(colors: [
+                            Color.cyan.opacity(colorScheme == .dark ? 0.66 : 0.42),
+                            Color.blue.opacity(0.14),
+                            Color.purple.opacity(colorScheme == .dark ? 0.58 : 0.36),
+                            Color.pink.opacity(colorScheme == .dark ? 0.64 : 0.40),
+                            Color.orange.opacity(0.34),
+                            Color.cyan.opacity(colorScheme == .dark ? 0.66 : 0.42)
+                        ], center: .center),
+                        lineWidth: side * 0.038
+                    )
+                    .padding(side * 0.018)
+                    .blur(radius: side * 0.012)
+                    .shadow(color: Color.purple.opacity(0.20), radius: side * 0.06)
+
                 // Outer transparent glass body, with a soft rim.
                 Circle()
                     .fill(.ultraThinMaterial)
@@ -599,6 +632,20 @@ private struct FieldOrb: View {
                     .shadow(color: tint.opacity(0.24 + intensity * 0.24),
                             radius: 26 + CGFloat(intensity) * 24, y: 14)
 
+                // Soft refracted hues, like colored lights reflecting through polished glass.
+                Circle()
+                    .fill(AngularGradient(colors: [
+                        Color.cyan.opacity(colorScheme == .dark ? 0.17 : 0.10),
+                        Color.blue.opacity(0.045),
+                        Color.purple.opacity(colorScheme == .dark ? 0.19 : 0.10),
+                        Color.pink.opacity(colorScheme == .dark ? 0.15 : 0.08),
+                        Color.orange.opacity(0.06),
+                        Color.cyan.opacity(colorScheme == .dark ? 0.17 : 0.10)
+                    ], center: .center))
+                    .padding(side * 0.052)
+                    .blur(radius: side * 0.025)
+                    .mask(Circle().padding(side * 0.035))
+
                 // Liquid, layered color inside the glass: simulation heatmap colors.
                 Circle()
                     .fill(
@@ -617,17 +664,31 @@ private struct FieldOrb: View {
                     .mask(Circle().padding(side * 0.035))
                     .scaleEffect(isMeasuring ? (drift ? 1.025 : 0.975) : 1)
 
-                // Soft translucent blobs give the orb the reference's glassy depth.
+                // Broad studio-light reflection across the glass surface.
                 Ellipse()
                     .fill(LinearGradient(colors: [
-                        .white.opacity(0.34),
-                        .white.opacity(0.045),
-                        tint.opacity(0.06)
+                        .white.opacity(colorScheme == .dark ? 0.46 : 0.34),
+                        .white.opacity(0.075),
+                        Color.cyan.opacity(0.05),
+                        .clear
                     ], startPoint: .topLeading, endPoint: .bottomTrailing))
-                    .frame(width: side * 0.60, height: side * 0.25)
-                    .blur(radius: side * 0.018)
-                    .rotationEffect(.degrees(drift ? -24 : -16))
+                    .frame(width: side * 0.68, height: side * 0.28)
+                    .blur(radius: side * 0.014)
+                    .rotationEffect(.degrees(drift ? -23 : -16))
                     .offset(x: -side * 0.10, y: -side * 0.22)
+                    .blendMode(.screen)
+
+                // A secondary cool highlight balances the warmer edge reflections.
+                Ellipse()
+                    .fill(LinearGradient(colors: [
+                        Color.cyan.opacity(colorScheme == .dark ? 0.23 : 0.14),
+                        Color.purple.opacity(0.08),
+                        .clear
+                    ], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: side * 0.24, height: side * 0.42)
+                    .blur(radius: side * 0.035)
+                    .rotationEffect(.degrees(24))
+                    .offset(x: side * 0.29, y: -side * 0.015)
                     .blendMode(.screen)
 
                 Circle()
@@ -867,8 +928,8 @@ private struct CalculationSettingsView: View {
                         .disabled(
                             !sensor.isRunning ||
                             !sensor.baselineCaptured ||
-                            (sensor.latestSample?.deltaMagnitude ?? 0) <
-                                CurrentEstimateCalculator.minimumUsableFieldChangeMicrotesla
+                            (sensor.latestSample?.filteredDeltaMagnitude ?? 0) <
+                                sensor.minimumUsableFieldChangeMicrotesla
                         )
 
                         if let calibrationFeedback {
@@ -911,7 +972,7 @@ private struct CalculationSettingsView: View {
                     HStack {
                         Text("Change from baseline")
                         Spacer()
-                        Text(sensor.latestSample?.deltaMagnitude.map {
+                        Text(sensor.latestSample?.filteredDeltaMagnitude.map {
                             String(format: "%.3f µT", $0)
                         } ?? "—")
                             .monospacedDigit()
@@ -932,7 +993,7 @@ private struct CalculationSettingsView: View {
 
                 Section("Measurement limits") {
                     Text("One magnetic-field reading cannot independently determine both current and distance. The app calculates one from a supplied reference, or uses a cable-specific sensitivity calibrated against a known current.")
-                    Text("Readings below 0.5 µT are treated as too weak. Low or uncalibrated sensor status lowers confidence. These estimates are not a substitute for a clamp meter.")
+                    Text("Readings below 0.5 µT, or below five times the measured baseline noise, are treated as too weak. Low or uncalibrated sensor status lowers confidence. These estimates are not a substitute for a clamp meter.")
                 }
             }
             .navigationTitle("Calculation Setup")
@@ -955,9 +1016,9 @@ private struct CalculationSettingsView: View {
         }
         guard sensor.isRunning,
               sensor.baselineCaptured,
-              let field = sensor.latestSample?.deltaMagnitude,
+              let field = sensor.latestSample?.filteredDeltaMagnitude,
               field.isFinite,
-              field >= CurrentEstimateCalculator.minimumUsableFieldChangeMicrotesla else {
+              field >= sensor.minimumUsableFieldChangeMicrotesla else {
             calibrationFeedback = "Start measurement and wait for a stable field reading."
             return
         }
