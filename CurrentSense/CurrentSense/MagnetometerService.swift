@@ -73,16 +73,19 @@ final class MagnetometerService: ObservableObject {
         return q
     }()
 
-    private let maximumStoredSamples = 60_000
-    private let maximumChartSamples = 5_000
-    private let uiPublishInterval: TimeInterval = 0.10
+    // Bound in-memory traces so long scans do not grow without limit.
+    private let maximumStoredSamples = 30_000
+    private let maximumChartSamples = 1_200
+    // Publish only enough for a responsive stable display; raw Core Motion data
+    // is still retained separately for diagnostics/CSV export.
+    private let uiPublishInterval: TimeInterval = 0.16
     private let baselineCaptureDuration: TimeInterval = 2.0
     private let minimumBaselineSamples = 10
     private let standbyUpdateInterval: TimeInterval = 1.0 / 10.0
     // Do not request exactly 100 Hz (the Nyquist boundary for 50 Hz mains).
     // The non-synchronous target can help reveal changes, but cannot guarantee
     // waveform reconstruction or true-RMS AC measurement.
-    private let measurementUpdateInterval: TimeInterval = 1.0 / 80.0
+    private let measurementUpdateInterval: TimeInterval = 1.0 / 40.0
 
     private var rawSamples: [MagneticSample] = []
     private var lastUIPublish: Date = .distantPast
