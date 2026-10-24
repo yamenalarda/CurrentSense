@@ -210,7 +210,7 @@ struct ContentView: View {
                 .font(.system(size: 10, weight: .regular, design: .rounded))
                 .foregroundStyle(secondaryTextColor)
                 .fixedSize(horizontal: false, vertical: true)
-            Text("Not an NCV voltage tester. No detected field does not mean voltage is absent.")
+            Text("Reads magnetic changes, not voltage. Motors, magnets and phone movement can trigger it. No response does not mean voltage is absent.")
                 .font(.system(size: 10, weight: .semibold, design: .rounded))
                 .foregroundStyle(colorScheme == .dark ? Color.orange.opacity(0.95) : Color.orange)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1041,7 +1041,7 @@ private struct CalculationSettingsView: View {
                 if isAC {
                     Section("AC field scan") {
                         Text("AC mode is qualitative: it classifies the magnetic-field response as none, weak, moderate or strong. It intentionally does not display amperes, centimeters or voltage numbers.")
-                        Text("A real NCV tester senses an electric field. CurrentSense uses the iPhone magnetometer, so it cannot verify that a cable is live or prove that voltage is absent.")
+                        Text("A real NCV tester senses an electric field. CurrentSense reads magnetic changes, which can also come from motors, magnets or phone movement; it cannot verify that a cable is live or prove that voltage is absent.")
                         Text("Use a properly rated voltage tester and the correct electrical safety procedure when checking for dangerous voltage.")
                     }
                 } else {
