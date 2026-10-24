@@ -14,11 +14,12 @@ struct MagneticSample: Identifiable {
     let magnitude: Double
     /// Vector change from the averaged start baseline. Nil while the baseline is being captured.
     let deltaMagnitude: Double?
+    let calibrationQuality: String
 
     var csvRow: String {
         let formatter = ISO8601DateFormatter()
         let delta = deltaMagnitude.map { String($0) } ?? ""
-        return "\(formatter.string(from: timestamp)),\(x),\(y),\(z),\(magnitude),\(delta)"
+        return "\(formatter.string(from: timestamp)),\(x),\(y),\(z),\(magnitude),\(delta),\(calibrationQuality)"
     }
 }
 
@@ -177,7 +178,8 @@ final class MagnetometerService: ObservableObject {
                     y: y,
                     z: z,
                     magnitude: magnitude,
-                    deltaMagnitude: deltaMagnitude
+                    deltaMagnitude: deltaMagnitude,
+                    calibrationQuality: calibrationQuality
                 )
 
                 self.rawSamples.append(sample)
@@ -248,7 +250,7 @@ final class MagnetometerService: ObservableObject {
 
     func exportCSV() -> URL? {
         guard !rawSamples.isEmpty else { return nil }
-        let header = "timestamp_iso8601,x_uT,y_uT,z_uT,total_magnitude_uT,delta_from_baseline_uT"
+        let header = "timestamp_iso8601,x_uT,y_uT,z_uT,total_magnitude_uT,delta_from_baseline_uT,calibration_quality"
         let body = rawSamples.map(\.csvRow).joined(separator: "\n")
         let contents = header + "\n" + body + "\n"
         let url = FileManager.default.temporaryDirectory
