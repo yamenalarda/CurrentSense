@@ -542,6 +542,7 @@ private struct FieldOrb: View {
                 if active {
                     withAnimation(.spring(response: 0.48, dampingFraction: 0.68)) {
                         drift = true
+                        detectionPulse = false
                     }
                     withAnimation(.easeInOut(duration: 2.1).repeatForever(autoreverses: true)) {
                         drift = false
@@ -549,6 +550,11 @@ private struct FieldOrb: View {
                 } else {
                     withAnimation(.spring(response: 0.5, dampingFraction: 0.72)) {
                         drift = false
+                    }
+                    if proximitySignal {
+                        withAnimation(.easeInOut(duration: 1.15).repeatForever(autoreverses: true)) {
+                            detectionPulse = true
+                        }
                     }
                 }
             }
