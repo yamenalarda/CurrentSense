@@ -6,29 +6,37 @@ struct ContentView: View {
     @State private var showSetup = false
 
     var body: some View {
-        ZStack {
-            BackgroundView()
-            VStack(spacing: 18) {
-                ModeSelector(selected: vm.mode, onSelect: vm.setMode)
-                    .padding(.top, 4)
+        GeometryReader { geometry in
+            let compact = geometry.size.height < 720
+            let circleSide = min(geometry.size.width - 36, geometry.size.height * (compact ? 0.38 : 0.46))
+            ZStack {
+                BackgroundView()
+                VStack(spacing: compact ? 8 : 12) {
+                    ModeSelector(selected: vm.mode, onSelect: vm.setMode)
+                        .padding(.top, 2)
 
-                Button(action: vm.toggle) {
-                    GlassCircle(phase: vm.snapshot.phase, level: vm.snapshot.level,
-                                progress: vm.snapshot.acquisitionProgress,
-                                title: circleText.0, subtitle: circleText.1)
+                    Button(action: vm.toggle) {
+                        GlassCircle(phase: vm.snapshot.phase, level: vm.snapshot.level,
+                                    progress: vm.snapshot.acquisitionProgress,
+                                    title: circleText.0, subtitle: circleText.1)
+                            .frame(width: circleSide, height: circleSide)
+                    }
+                    .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: circleSide)
+                    .accessibilityLabel("Measurement control")
+                    .accessibilityValue(accessibilityState)
+                    .accessibilityHint(vm.isRunning ? "Double tap to stop measuring" : "Double tap to start measuring")
+                    .accessibilityIdentifier("measure.button")
+
+                    ReadingsPanel(presentation: presentation, mode: vm.mode,
+                                  audioEnabled: $vm.audioEnabled, onSetup: { showSetup = true })
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .buttonStyle(.plain)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .accessibilityLabel("Measurement control")
-                .accessibilityValue(accessibilityState)
-                .accessibilityHint(vm.isRunning ? "Double tap to stop measuring" : "Double tap to start measuring")
-                .accessibilityIdentifier("measure.button")
-
-                ReadingsPanel(presentation: presentation, mode: vm.mode,
-                              audioEnabled: $vm.audioEnabled, onSetup: { showSetup = true })
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                .padding(.horizontal, 16)
+                .padding(.vertical, compact ? 4 : 8)
             }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 8)
         }
         .sheet(isPresented: $showSetup) {
             CalibrationSheet().environmentObject(vm)

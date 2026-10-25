@@ -22,18 +22,28 @@ struct ReadingsPanel: View {
                 }
                 Button { audioEnabled.toggle() } label: {
                     Image(systemName: audioEnabled ? "speaker.wave.2" : "speaker.slash")
-                        .frame(minWidth: 32, minHeight: 32)
+                        .frame(width: 32, height: 32)
+                        .contentShape(Rectangle())
                 }
+                .fixedSize()
                 .accessibilityLabel("Audio feedback")
                 .accessibilityValue(audioEnabled ? "On" : "Off")
                 .accessibilityIdentifier("audio.toggle")
             }
             ForEach(presentation.rows) { row in
-                HStack(alignment: .firstTextBaseline) {
-                    Text(row.label).font(.subheadline).foregroundStyle(.secondary)
-                    Spacer()
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(row.label)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.78)
+                    Spacer(minLength: 6)
                     Text(row.value)
                         .font(.headline.monospacedDigit())
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.68)
+                        .multilineTextAlignment(.trailing)
+                        .layoutPriority(1)
                         .opacity(presentation.isLive ? 1 : 0.65)   // last results look different from live ones
                         .accessibilityIdentifier("reading.\(row.id).value")
                 }
