@@ -9,8 +9,9 @@ struct ContentView: View {
         GeometryReader { geometry in
             let compact = geometry.size.height < 720
             let circleSide = min(geometry.size.width - 36, geometry.size.height * (compact ? 0.38 : 0.46))
-            ZStack {
+            ZStack(alignment: .center) {
                 BackgroundView()
+                    .frame(width: geometry.size.width, height: geometry.size.height)
                 VStack(spacing: compact ? 8 : 12) {
                     ModeSelector(selected: vm.mode, onSelect: vm.setMode)
                         .padding(.top, 2)
@@ -33,10 +34,12 @@ struct ContentView: View {
                                   audioEnabled: $vm.audioEnabled, onSetup: { showSetup = true })
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                .frame(width: geometry.size.width, height: geometry.size.height, alignment: .center)
                 .padding(.horizontal, 16)
                 .padding(.vertical, compact ? 4 : 8)
             }
+            .frame(width: geometry.size.width, height: geometry.size.height, alignment: .center)
+            .clipped()
         }
         .sheet(isPresented: $showSetup) {
             CalibrationSheet().environmentObject(vm)
