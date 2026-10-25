@@ -1,0 +1,119 @@
+name: Build and test (unsigned IPA)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: currentsense-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    env:
+      SOURCE_DIR: CurrentSense
+      MARKETING_VERSION: "1.0.0"
+      BUNDLE_ID: com.currentsense.app
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Toolchain information
+        run: |
+          xcodebuild -version
+          swift --version
+          sw_vers
+          xcrun simctl list runtimes | head -n 20
+
+      - name: Install XcodeGen
+        run: HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
+
+      - name: Prepare build output directory
+        run: mkdir -p "$SOURCE_DIR/build"
+
+      - name: Core unit and regression tests
+        working-directory: CurrentSense/Packages/CurrentSenseCore
+        run: swift test 2>&1 | tee "$GITHUB_WORKSPACE/$SOURCE_DIR/build/swift-test.log"
+
+      - name: Generate Xcode project
+        working-directory: CurrentSense
+        run: xcodegen generate
+
+      - name: UI tests on iPhone simulator
+        working-directory: CurrentSense
+        run: |
+          UDID="$(scripts/pick_simulator.sh)"
+          test -n "$UDID" || { echo "No iPhone simulator available"; exit 1; }
+          echo "Simulator: $UDID"
+          xcodebuild test -project CurrentSense.xcodeproj -scheme CurrentSense \
+            -destination "id=$UDID" -resultBundlePath build/UITests.xcresult \
+            CS_SOURCE_REVISION="$GITHUB_SHA" 2>&1 | tee build/uitests.log | tail -n 80
+
+      - name: Archive Release build (unsigned)
+        working-directory: CurrentSense
+        run: |
+          xcodebuild archive -project CurrentSense.xcodeproj -scheme CurrentSense \
+            -configuration Release -destination 'generic/platform=iOS' \
+            -archivePath build/CurrentSense.xcarchive \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            MARKETING_VERSION="$MARKETING_VERSION" \
+            CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
+            CS_SOURCE_REVISION="$GITHUB_SHA" 2>&1 | tee build/archive.log | tail -n 60
+
+      - name: Package and verify IPA
+        working-directory: CurrentSense
+        run: |
+          SHORT="${GITHUB_SHA:0:7}"
+          IPA="build/CurrentSense-${MARKETING_VERSION}-b${GITHUB_RUN_NUMBER}-${SHORT}-unsigned.ipa"
+          scripts/package_ipa.sh build/CurrentSense.xcarchive "$IPA"
+          scripts/verify_ipa.sh "$IPA" "$BUNDLE_ID" "$GITHUB_RUN_NUMBER" "$GITHUB_SHA" | tee build/ipa-verify.log
+          echo "IPA_PATH=$IPA" >> "$GITHUB_ENV"
+
+      - name: Create release report
+        working-directory: CurrentSense
+        run: |
+          {
+            echo "# CurrentSense build report"
+            echo
+            echo "- Source revision: `$GITHUB_SHA`"
+            echo "- Workflow run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID (run number $GITHUB_RUN_NUMBER)"
+            echo "- Artifact: `$(basename "$IPA_PATH")`"
+            echo "- Core tests: $(grep -E 'Executed [0-9]+ tests' build/swift-test.log | tail -n 1 || true)"
+            echo "- UI tests: $(grep -E 'Executed [0-9]+ tests|TEST (SUCCEEDED|FAILED)' build/uitests.log | tail -n 2 | tr '\n' ' ' || true)"
+            echo "- Archive: $(grep -E 'ARCHIVE (SUCCEEDED|FAILED)' build/archive.log | tail -n 1 || true)"
+            echo "- Physical-device validation: NOT performed by CI"
+            echo
+            echo 'Verification output:'
+            echo '```'
+            cat build/ipa-verify.log
+            echo '```'
+          } | tee build/release-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload unsigned IPA and report
+        uses: actions/upload-artifact@v4
+        with:
+          name: CurrentSense-unsigned-ipa-b${{ github.run_number }}-${{ github.sha }}
+          path: |
+            ${{ env.SOURCE_DIR }}/${{ env.IPA_PATH }}
+            ${{ env.SOURCE_DIR }}/build/release-report.md
+          if-no-files-found: error
+
+      - name: Upload logs and UI test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-b${{ github.run_number }}
+          path: |
+            CurrentSense/build/*.log
+            CurrentSense/build/UITests.xcresult
+          if-no-files-found: ignore
