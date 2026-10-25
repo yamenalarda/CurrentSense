@@ -79,7 +79,7 @@ final class ACPipelineTests: XCTestCase {
         var g = Synth()
         let p = makePipeline(.ac)
         feed(p, g.samples(from: 0, duration: 2.5))
-        g.rotationRate = Vector3(1.2, 0, 0)
+        g.rotationRate = Vector3(2.0, 0, 0) // fast rotation remains suppressed
         let last = feed(p, g.samples(from: 2.5, duration: 2, extra: tone(60, amplitude: 4))).last!
         XCTAssertEqual(last.issue, .holdStill)
         XCTAssertNil(last.fieldPresent)

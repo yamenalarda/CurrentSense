@@ -72,7 +72,7 @@ final class DCPipelineTests: XCTestCase {
         let p = makePipeline(.dc, geometry: .calibrated(cal))
         feed(p, g.samples(from: 0, duration: 2.5))
         feed(p, g.samples(from: 2.5, duration: 2) { _ in Vector3(0, 0, 3) })
-        g.rotationRate = Vector3(1, 0, 0)
+        g.rotationRate = Vector3(1.8, 0, 0) // fast rotation remains suppressed
         let moving = feed(p, g.samples(from: 4.5, duration: 1) { _ in Vector3(0, 0, 3) }).last!
         XCTAssertEqual(moving.issue, .holdStill)
         XCTAssertNil(moving.deltaMagnitude)

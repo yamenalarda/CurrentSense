@@ -12,9 +12,9 @@ protocol MagnetometerSource: AnyObject {
     func stop()
 }
 
-/// Raw magnetometer (µT, device frame, includes hard-iron offsets) plus gyro/accelerometer-fused
-/// attitude and rotation rate from device motion. The attitude reference frame `xArbitraryZVertical`
-/// does NOT use the magnetometer, so heading jumps cannot corrupt the baseline-validity check.
+/// Magnetometer samples are transformed to a session-stable reference frame when Core Motion
+/// attitude is available. Its `xArbitraryZVertical` frame does not use the magnetometer, avoiding
+/// heading jumps; samples are skipped briefly rather than mixed across coordinate frames if stale.
 final class CoreMotionSource: MagnetometerSource {
     private let manager = CMMotionManager()
     private let lock = NSLock()
