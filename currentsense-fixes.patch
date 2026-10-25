@@ -1,0 +1,166 @@
+diff --git a/CurrentSense/Model/SettingsStore.swift b/CurrentSense/Model/SettingsStore.swift
+index 887fbac..36840c2 100644
+--- a/CurrentSense/Model/SettingsStore.swift
++++ b/CurrentSense/Model/SettingsStore.swift
+@@ -16,7 +16,7 @@ final class SettingsStore {
+     }
+ 
+     var geometryChoice: GeometryChoice {
+-        get { GeometryChoice(rawValue: defaults.string(forKey: "geometryChoice") ?? "") ?? .off }
++        get { GeometryChoice(rawValue: defaults.string(forKey: "geometryChoice") ?? "") ?? .idealWire }
+         set { defaults.set(newValue.rawValue, forKey: "geometryChoice") }
+     }
+ 
+diff --git a/CurrentSense/UI/GlassCircle.swift b/CurrentSense/UI/GlassCircle.swift
+index bd190b6..63d9e9a 100644
+--- a/CurrentSense/UI/GlassCircle.swift
++++ b/CurrentSense/UI/GlassCircle.swift
+@@ -78,6 +78,8 @@ struct GlassCircle: View {
+     private func glass(side: CGFloat, tint: Color) -> some View {
+         let dark = scheme == .dark
+         return ZStack {
++            Circle().fill(tint.opacity(dark ? 0.40 : 0.28))   // soft glow behind the glass (replaces .shadow)
++                .blur(radius: side * 0.09).scaleEffect(0.96).offset(y: side * 0.04)
+             Circle().fill(.ultraThinMaterial)
+             Circle().fill(RadialGradient(colors: [tint.opacity(dark ? 0.55 : 0.45), tint.opacity(0.12)],
+                                          center: UnitPoint(x: 0.35, y: 0.30), startRadius: 0, endRadius: side * 0.75))
+@@ -98,7 +100,5 @@ struct GlassCircle: View {
+                                                            .white.opacity(0.08), .white.opacity(0.9)], center: .center),
+                                   lineWidth: max(1.5, side * 0.006))
+         }
+-        .compositingGroup()
+-        .shadow(color: tint.opacity(dark ? 0.45 : 0.30), radius: side * 0.09, y: side * 0.05)
+     }
+ }
+diff --git a/CurrentSense/UI/Theme.swift b/CurrentSense/UI/Theme.swift
+index c3b5c87..4ca48fd 100644
+--- a/CurrentSense/UI/Theme.swift
++++ b/CurrentSense/UI/Theme.swift
+@@ -31,14 +31,20 @@ struct BackgroundView: View {
+                            ? [Color(red: 0.03, green: 0.04, blue: 0.09), Color(red: 0.08, green: 0.06, blue: 0.17)]
+                            : [Color(red: 0.91, green: 0.95, blue: 1.00), Color(red: 0.96, green: 0.93, blue: 1.00)],
+                            startPoint: .top, endPoint: .bottom)
+-            ZStack {
+-                Circle().fill(Color.blue.opacity(dark ? 0.35 : 0.26)).frame(width: 320).offset(x: -120, y: -230)
+-                Circle().fill(Color.purple.opacity(dark ? 0.32 : 0.20)).frame(width: 300).offset(x: 150, y: 40)
+-                Circle().fill(Color.orange.opacity(dark ? 0.16 : 0.16)).frame(width: 260).offset(x: -70, y: 300)
+-            }
+-            .blur(radius: 80)
+-            .drawingGroup()
++            // Radial-gradient blobs instead of blur()+drawingGroup(): drawingGroup rasterised the blurred
++            // blobs inside a fixed rectangle, which showed up as a hard-edged coloured square.
++            blob(.blue, dark ? 0.55 : 0.40, 460).offset(x: -120, y: -230)
++            blob(.purple, dark ? 0.50 : 0.30, 440).offset(x: 150, y: 40)
++            blob(.orange, dark ? 0.30 : 0.28, 380).offset(x: -70, y: 300)
+         }
+         .ignoresSafeArea()
+     }
++
++    private func blob(_ color: Color, _ opacity: Double, _ size: CGFloat) -> some View {
++        Circle()
++            .fill(RadialGradient(colors: [color.opacity(opacity), color.opacity(0)],
++                                 center: .center, startRadius: 0, endRadius: size / 2))
++            .frame(width: size, height: size)
++            .allowsHitTesting(false)
++    }
+ }
+diff --git a/Packages/CurrentSenseCore/Sources/CurrentSenseCore/Config.swift b/Packages/CurrentSenseCore/Sources/CurrentSenseCore/Config.swift
+index 8d8bc3b..813ea92 100644
+--- a/Packages/CurrentSenseCore/Sources/CurrentSenseCore/Config.swift
++++ b/Packages/CurrentSenseCore/Sources/CurrentSenseCore/Config.swift
+@@ -42,8 +42,8 @@ public struct PipelineConfig: Equatable, Sendable {
+     public var acRMSWindow = 1.0
+     public var acMinSpan = 0.5
+     public var acNoiseFloorMin = 0.03             // µT
+-    public var acEnterRatio = 2.0
+-    public var acExitRatio = 1.5
++    public var acEnterRatio = 1.8
++    public var acExitRatio = 1.4
+     public var acEnterDwell = 0.3
+     public var acExitDwell = 0.5
+     public var acModerateRatio = 4.0
+diff --git a/Packages/CurrentSenseCore/Sources/CurrentSenseCore/Presentation.swift b/Packages/CurrentSenseCore/Sources/CurrentSenseCore/Presentation.swift
+index 311efe6..69bb983 100644
+--- a/Packages/CurrentSenseCore/Sources/CurrentSenseCore/Presentation.swift
++++ b/Packages/CurrentSenseCore/Sources/CurrentSenseCore/Presentation.swift
+@@ -41,11 +41,11 @@ public enum ReadingsPresenter {
+         v < 10 ? String(format: "%.2f \u{00B5}T", v) : String(format: "%.1f \u{00B5}T", v)
+     }
+ 
+-    public static func formatCurrent(amps: Double, relativeUncertainty: Double) -> String {
++    public static func formatCurrent(amps: Double, relativeUncertainty: Double, rough: Bool = false) -> String {
+         let digits = amps < 1 ? "%.2f" : (amps < 10 ? "%.1f" : "%.0f")
+         let value = String(format: digits, amps)
+         let pct = Int((relativeUncertainty * 100 / 5).rounded() * 5)
+-        return "\u{2248} \(value) A \u{00B1}\(pct)%"
++        return "\u{2248} \(value) A \u{00B1}\(pct)%" + (rough ? " (rough)" : "")
+     }
+ 
+     static func confidenceText(_ c: Confidence) -> String {
+@@ -64,7 +64,8 @@ public enum ReadingsPresenter {
+             var current = dash
+             if let e = s.currentEstimate {
+                 switch e {
+-                case .available(let a, let u, _): current = formatCurrent(amps: a, relativeUncertainty: u)
++                case .available(let a, let u, let basis):
++                    current = formatCurrent(amps: a, relativeUncertainty: u, rough: basis == .idealSingleConductor)
+                 case .unavailable: current = s.phase == .idle ? dash : "Unavailable"
+                 }
+             }
+@@ -83,8 +84,10 @@ public enum ReadingsPresenter {
+                 case .strong: strength = "Strong"
+                 }
+             }
++            let activity = s.acRatio.map { String(format: "%.1f\u{00D7} background", $0) } ?? dash
+             return [ReadingRow(id: "field", label: "Field", value: field),
+                     ReadingRow(id: "strength", label: "Strength", value: strength),
++                    ReadingRow(id: "activity", label: "Activity", value: activity),
+                     ReadingRow(id: "quality", label: "Signal quality", value: confidenceText(s.confidence))]
+         }
+     }
+@@ -116,7 +119,10 @@ public enum ReadingsPresenter {
+                          : "No AC magnetic activity detected. This does not prove a conductor is safe."
+             }
+             switch s.currentEstimate {
+-            case .available: return "Estimate assumes the selected calibration or geometry."
++            case .available(_, _, let basis):
++                return basis == .idealSingleConductor
++                    ? "Rough estimate: assumes one straight wire at the set distance. Cables with phase and neutral together usually carry more than shown."
++                    : "Estimate valid only at the calibrated position."
+             case .unavailable(let r)?:
+                 switch r {
+                 case .notCalibrated: return "Switch the load on. A current needs a calibration or geometry model."
+diff --git a/Packages/CurrentSenseCore/Tests/CurrentSenseCoreTests/LifecycleTests.swift b/Packages/CurrentSenseCore/Tests/CurrentSenseCoreTests/LifecycleTests.swift
+index 2815fe8..3673522 100644
+--- a/Packages/CurrentSenseCore/Tests/CurrentSenseCoreTests/LifecycleTests.swift
++++ b/Packages/CurrentSenseCore/Tests/CurrentSenseCoreTests/LifecycleTests.swift
+@@ -120,5 +120,10 @@ final class LifecycleTests: XCTestCase {
+         XCTAssertEqual(m.update(level: 0, active: true, dt: 0.1).amplitude, 0)
+         XCTAssertLessThanOrEqual(a.amplitude, 0.2)
+     }
+-}
+ 
++    func testRoughCurrentIsLabelled() {
++        XCTAssertEqual(ReadingsPresenter.formatCurrent(amps: 2.04, relativeUncertainty: 0.32, rough: true),
++                       "\u{2248} 2.0 A \u{00B1}30% (rough)")
++        XCTAssertFalse(ReadingsPresenter.formatCurrent(amps: 2, relativeUncertainty: 0.1).contains("rough"))
++    }
++}
+diff --git a/docs/SCIENCE.md b/docs/SCIENCE.md
+index 4a37593..8715a12 100644
+--- a/docs/SCIENCE.md
++++ b/docs/SCIENCE.md
+@@ -20,11 +20,11 @@
+ - Calibration uncertainty = max(5 %, sqrt(repeatability^2 + 3 %^2)); the 3 % is an assumed clamp-meter tolerance. Single-point, assumes linearity.
+ 
+ ## 4. AC detection
+-- Chain: 2nd-order high-pass (8 Hz, or 0.1*fs if lower) -> 1 s RMS -> ratio to the quiet-baseline noise floor measured through the same filter -> Schmitt trigger (enter 2.0 for 0.3 s, exit 1.5 for 0.5 s) -> categories at ratio 4 and 10 with 10 % hysteresis. Output is relative, not calibrated.
++- Chain: 2nd-order high-pass (8 Hz, or 0.1*fs if lower) -> 1 s RMS -> ratio to the quiet-baseline noise floor measured through the same filter -> Schmitt trigger (enter 1.8 for 0.3 s, exit 1.4 for 0.5 s) -> categories at ratio 4 and 10 with 10 % hysteresis. Output is relative, not calibrated.
+ - It detects **AC-band magnetic activity above ~8 Hz** (including vibration of nearby magnets, motors, etc.), not specifically mains.
+ - **Sampling/aliasing.** At fs = 100 Hz: a 60 Hz tone aliases to 40 Hz (detectable); a 50 Hz tone lands exactly on Nyquist and its apparent amplitude is `A*|sin(phase)|`, so it can be invisible (tested, documented blind spot); 140 Hz also aliases to 40 Hz and is indistinguishable from 60 Hz (tested). A mains-tone check (single-frequency projection with real timestamps, +/-1 Hz scan, 1 s window, fraction >= 0.35) is reported only as **supporting evidence** for confidence; frequencies near DC or Nyquist are marked unresolvable. Whether the real sensor low-pass filters before decimation (attenuating 50/60 Hz) is unknown.
+ - Motion: rotation > 0.5 rad/s suppresses AC output with a 0.5 s hold-off. Linear hand movement is not observable (accelerometer unused); the 8 Hz second-order high-pass attenuates slow sway (1.5 Hz, 5 uT -> ratio ~1.3 in the prototype), but shaking at 5-15 Hz can leak through.
+-- Prototype numbers (Python, white Gaussian noise 0.1 uT/axis, fs 100): noise floor 0.082 uT; 60 Hz at 0.2 / 0.7 / 2 / 8 uT -> ratio 1.35 / 3.5 / 9.8 / 39; noise-only worst ratio over 200 x 20 s = 1.22 (threshold 2.0). Real sensor noise is probably not white or stationary; **thresholds are provisional until measured on device.**
++- Prototype numbers (Python, white Gaussian noise 0.1 uT/axis, fs 100): noise floor 0.082 uT; 60 Hz at 0.2 / 0.7 / 2 / 8 uT -> ratio 1.35 / 3.5 / 9.8 / 39; noise-only worst ratio over 200 x 20 s = 1.22 (threshold 1.8). Real sensor noise is probably not white or stationary; **thresholds are provisional until measured on device.**
+ 
+ ## 5. What has and has not been validated
+ Validated: algorithm behaviour on synthetic data in a Python prototype (executed). Written but not executed: all Swift tests. Not done: any physical-device test, rate measurement, reference-meter comparison, CPU/battery profiling, long-session and orientation tests. The first things to measure on a real iPhone 15: delivered magnetometer rate and jitter, quiet-state noise sigma, and whether a known 50/60 Hz source produces a stable response.
