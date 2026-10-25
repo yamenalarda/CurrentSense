@@ -52,7 +52,7 @@ jobs:
       - name: UI tests on iPhone simulator
         working-directory: CurrentSense
         run: |
-          UDID="$(scripts/pick_simulator.sh)"
+          UDID="$(bash scripts/pick_simulator.sh)"
           test -n "$UDID" || { echo "No iPhone simulator available"; exit 1; }
           echo "Simulator: $UDID"
           xcodebuild test -project CurrentSense.xcodeproj -scheme CurrentSense \
@@ -75,8 +75,8 @@ jobs:
         run: |
           SHORT="${GITHUB_SHA:0:7}"
           IPA="build/CurrentSense-${MARKETING_VERSION}-b${GITHUB_RUN_NUMBER}-${SHORT}-unsigned.ipa"
-          scripts/package_ipa.sh build/CurrentSense.xcarchive "$IPA"
-          scripts/verify_ipa.sh "$IPA" "$BUNDLE_ID" "$GITHUB_RUN_NUMBER" "$GITHUB_SHA" | tee build/ipa-verify.log
+          bash scripts/package_ipa.sh build/CurrentSense.xcarchive "$IPA"
+          bash scripts/verify_ipa.sh "$IPA" "$BUNDLE_ID" "$GITHUB_RUN_NUMBER" "$GITHUB_SHA" | tee build/ipa-verify.log
           echo "IPA_PATH=$IPA" >> "$GITHUB_ENV"
 
       - name: Create release report
