@@ -13,6 +13,37 @@ final class CurrentSenseUITests: XCTestCase {
 
     private func header() -> String { app.staticTexts["readings.header"].label }
 
+    func testMainLayoutIsCenteredAndFitsScreen() {
+        let screen = app.frame
+        let measure = app.buttons["measure.button"]
+        let ac = app.buttons["mode.ac"]
+        let dc = app.buttons["mode.dc"]
+        let panel = app.descendants(matching: .any)["readings.panel"]
+
+        XCTAssertTrue(measure.waitForExistence(timeout: 5))
+        XCTAssertTrue(panel.waitForExistence(timeout: 5))
+
+        let circleFrame = measure.frame
+        let panelFrame = panel.frame
+        let selectorFrame = CGRect(
+            x: ac.frame.minX,
+            y: min(ac.frame.minY, dc.frame.minY),
+            width: dc.frame.maxX - ac.frame.minX,
+            height: max(ac.frame.maxY, dc.frame.maxY) - min(ac.frame.minY, dc.frame.minY)
+        )
+
+        XCTAssertGreaterThanOrEqual(circleFrame.minX, screen.minX - 1)
+        XCTAssertLessThanOrEqual(circleFrame.maxX, screen.maxX + 1)
+        XCTAssertLessThanOrEqual(abs(circleFrame.midX - screen.midX), 3,
+                                 "Measurement circle must be centered horizontally")
+        XCTAssertGreaterThanOrEqual(panelFrame.minX, screen.minX - 1)
+        XCTAssertLessThanOrEqual(panelFrame.maxX, screen.maxX + 1)
+        XCTAssertLessThanOrEqual(abs(panelFrame.midX - screen.midX), 3,
+                                 "Readings panel must be centered horizontally")
+        XCTAssertLessThanOrEqual(abs(selectorFrame.midX - screen.midX), 5,
+                                 "Mode selector must be centered horizontally")
+    }
+
     func testModeSelectorUpdatesImmediately() {
         let ac = app.buttons["mode.ac"], dc = app.buttons["mode.dc"]
         XCTAssertTrue(dc.waitForExistence(timeout: 5))

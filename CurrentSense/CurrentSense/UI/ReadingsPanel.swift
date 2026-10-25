@@ -62,5 +62,7 @@ struct ReadingsPanel: View {
         .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous)
             .strokeBorder(LinearGradient(colors: [.white.opacity(0.5), .white.opacity(0.05)],
                                          startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("readings.panel")
     }
 }

@@ -7,41 +7,54 @@ struct ContentView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let compact = geometry.size.height < 720
-            let availableWidth = max(0, geometry.size.width - 40)
-            let circleSide = min(availableWidth, max(180, (geometry.size.height - (compact ? 230 : 270)) * 0.78))
+            // Resolve one usable content width and give every control that same width boundary.
+            // Do not apply horizontal padding after a screen-width frame; that can enlarge the
+            // resulting view beyond the viewport and make the whole composition look shifted.
+            let screenWidth = geometry.size.width
+            let screenHeight = geometry.size.height
+            let sideInset = min(20, screenWidth * 0.06)
+            let contentWidth = max(1, screenWidth - sideInset * 2)
+            let compact = screenHeight < 720
+            let circleLimit = max(168, (screenHeight - (compact ? 250 : 290)) * 0.72)
+            let circleSide = min(contentWidth, circleLimit)
+
             ZStack {
                 BackgroundView()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                VStack(spacing: compact ? 8 : 12) {
-                    ModeSelector(selected: vm.mode, onSelect: vm.setMode)
-                        .padding(.top, 2)
+                ScrollView(.vertical) {
+                    VStack(alignment: .center, spacing: compact ? 8 : 12) {
+                        ModeSelector(selected: vm.mode, onSelect: vm.setMode)
+                            .frame(width: min(260, contentWidth))
+                            .padding(.top, 2)
 
-                    Button(action: vm.toggle) {
-                        GlassCircle(phase: vm.snapshot.phase, level: vm.snapshot.level,
-                                    progress: vm.snapshot.acquisitionProgress,
-                                    title: circleText.0, subtitle: circleText.1)
-                            .frame(width: circleSide, height: circleSide)
+                        Button(action: vm.toggle) {
+                            GlassCircle(phase: vm.snapshot.phase, level: vm.snapshot.level,
+                                        progress: vm.snapshot.acquisitionProgress,
+                                        title: circleText.0, subtitle: circleText.1)
+                                .frame(width: circleSide, height: circleSide)
+                                .contentShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .frame(width: circleSide, height: circleSide)
+                        .accessibilityLabel("Measurement control")
+                        .accessibilityValue(accessibilityState)
+                        .accessibilityHint(vm.isRunning ? "Double tap to stop measuring" : "Double tap to start measuring")
+                        .accessibilityIdentifier("measure.button")
+
+                        ReadingsPanel(presentation: presentation, mode: vm.mode,
+                                      audioEnabled: $vm.audioEnabled, onSetup: { showSetup = true })
+                            .frame(width: contentWidth)
                     }
-                    .buttonStyle(.plain)
-                    .frame(width: circleSide, height: circleSide)
-                    .accessibilityLabel("Measurement control")
-                    .accessibilityValue(accessibilityState)
-                    .accessibilityHint(vm.isRunning ? "Double tap to stop measuring" : "Double tap to start measuring")
-                    .accessibilityIdentifier("measure.button")
-
-                    ReadingsPanel(presentation: presentation, mode: vm.mode,
-                                  audioEnabled: $vm.audioEnabled, onSetup: { showSetup = true })
-                        .frame(maxWidth: .infinity)
-                        .fixedSize(horizontal: false, vertical: true)
+                    // The inner column has a fixed, bounded width. Its outer frame occupies the
+                    // viewport and explicitly centers it, rather than relying on nested padding.
+                    .frame(width: contentWidth)
+                    .padding(.vertical, compact ? 4 : 8)
+                    .frame(maxWidth: .infinity, alignment: .center)
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, 20)
-                .padding(.vertical, compact ? 4 : 8)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                .scrollIndicators(.hidden)
+                .frame(width: screenWidth, height: screenHeight)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .frame(width: screenWidth, height: screenHeight)
             .clipped()
         }
         .sheet(isPresented: $showSetup) {
