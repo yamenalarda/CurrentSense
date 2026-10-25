@@ -73,6 +73,11 @@ jobs:
       - name: Package and verify IPA
         working-directory: CurrentSense
         run: |
+          # The source Info.plist currently contains a fixed CFBundleVersion.
+          # Stamp the actual CI run number into the archived app before packaging.
+          APP_PLIST="build/CurrentSense.xcarchive/Products/Applications/CurrentSense.app/Info.plist"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $GITHUB_RUN_NUMBER" "$APP_PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CSSourceRevision $GITHUB_SHA" "$APP_PLIST"
           SHORT="${GITHUB_SHA:0:7}"
           IPA="build/CurrentSense-${MARKETING_VERSION}-b${GITHUB_RUN_NUMBER}-${SHORT}-unsigned.ipa"
           bash scripts/package_ipa.sh build/CurrentSense.xcarchive "$IPA"
