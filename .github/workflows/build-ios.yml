@@ -26,7 +26,7 @@ jobs:
       BUNDLE_ID: com.currentsense.app
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Toolchain information
         run: |
@@ -55,9 +55,15 @@ jobs:
           UDID="$(bash scripts/pick_simulator.sh)"
           test -n "$UDID" || { echo "No iPhone simulator available"; exit 1; }
           echo "Simulator: $UDID"
-          xcodebuild test -project CurrentSense.xcodeproj -scheme CurrentSense \
+          if ! xcodebuild test -project CurrentSense.xcodeproj -scheme CurrentSense \
             -destination "id=$UDID" -resultBundlePath build/UITests.xcresult \
-            CS_SOURCE_REVISION="$GITHUB_SHA" 2>&1 | tee build/uitests.log | tail -n 80
+            CS_SOURCE_REVISION="$GITHUB_SHA" 2>&1 | tee build/uitests.log | tail -n 120; then
+            echo "::group::UI test failure summary"
+            xcrun xcresulttool get test-results summary --path build/UITests.xcresult --format json || true
+            xcrun xcresulttool get test-results tests --path build/UITests.xcresult --format json || true
+            echo "::endgroup::"
+            exit 1
+          fi
 
       - name: Archive Release build (unsigned)
         working-directory: CurrentSense
@@ -105,7 +111,7 @@ jobs:
           } | tee build/release-report.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload unsigned IPA and report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: CurrentSense-unsigned-ipa-b${{ github.run_number }}-${{ github.sha }}
           path: |

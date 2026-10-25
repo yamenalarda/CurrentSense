@@ -14,9 +14,15 @@ struct ContentView: View {
             // BackgroundView still extends behind the entire display.
             let screenWidth = geometry.size.width
             let screenHeight = geometry.size.height
+            // Some full-screen/status-bar configurations report a zero top safe-area inset.
+            // Use the global viewport origin as well, so controls never start inside the camera
+            // region when the status bar and persistent overlays are hidden.
+            let viewportTop = geometry.frame(in: .global).minY
+            let compact = screenHeight < 720
+            let existingTopSpacing: CGFloat = 10 + (compact ? 4 : 8)
+            let topSafeAreaCompensation = max(0, 58 - viewportTop - existingTopSpacing)
             let sideInset = min(20, screenWidth * 0.06)
             let contentWidth = max(1, screenWidth - sideInset * 2)
-            let compact = screenHeight < 720
             let circleLimit = max(168, (screenHeight - (compact ? 250 : 290)) * 0.72)
             let circleSide = min(contentWidth, circleLimit)
 
@@ -52,6 +58,7 @@ struct ContentView: View {
                     // The inner column has a fixed, bounded width. Its outer frame occupies the
                     // viewport and explicitly centers it, rather than relying on nested padding.
                     .frame(width: contentWidth)
+                    .padding(.top, topSafeAreaCompensation)
                     .padding(.vertical, compact ? 4 : 8)
                     .frame(maxWidth: .infinity, alignment: .center)
                 }
