@@ -8,10 +8,12 @@ struct ContentView: View {
     var body: some View {
         GeometryReader { geometry in
             let compact = geometry.size.height < 720
-            let circleSide = min(geometry.size.width - 36, geometry.size.height * (compact ? 0.38 : 0.46))
-            ZStack(alignment: .center) {
+            let availableWidth = max(0, geometry.size.width - 40)
+            let circleSide = min(availableWidth, max(180, (geometry.size.height - (compact ? 230 : 270)) * 0.78))
+            ZStack {
                 BackgroundView()
-                    .frame(width: geometry.size.width, height: geometry.size.height)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+
                 VStack(spacing: compact ? 8 : 12) {
                     ModeSelector(selected: vm.mode, onSelect: vm.setMode)
                         .padding(.top, 2)
@@ -23,8 +25,7 @@ struct ContentView: View {
                             .frame(width: circleSide, height: circleSide)
                     }
                     .buttonStyle(.plain)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: circleSide)
+                    .frame(width: circleSide, height: circleSide)
                     .accessibilityLabel("Measurement control")
                     .accessibilityValue(accessibilityState)
                     .accessibilityHint(vm.isRunning ? "Double tap to stop measuring" : "Double tap to start measuring")
@@ -32,13 +33,15 @@ struct ContentView: View {
 
                     ReadingsPanel(presentation: presentation, mode: vm.mode,
                                   audioEnabled: $vm.audioEnabled, onSetup: { showSetup = true })
+                        .frame(maxWidth: .infinity)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                .frame(width: geometry.size.width, height: geometry.size.height, alignment: .center)
-                .padding(.horizontal, 16)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 20)
                 .padding(.vertical, compact ? 4 : 8)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             }
-            .frame(width: geometry.size.width, height: geometry.size.height, alignment: .center)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .clipped()
         }
         .sheet(isPresented: $showSetup) {
