@@ -57,6 +57,10 @@ struct ContentView: View {
             .frame(width: screenWidth, height: screenHeight)
             .clipped()
         }
+        // Use the physical display bounds, not the default safe-area inset viewport.
+        .ignoresSafeArea(.all)
+        .statusBarHidden(true)
+        .persistentSystemOverlays(.hidden)
         .sheet(isPresented: $showSetup) {
             CalibrationSheet().environmentObject(vm)
         }
