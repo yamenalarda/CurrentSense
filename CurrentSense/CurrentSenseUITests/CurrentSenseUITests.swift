@@ -42,6 +42,8 @@ final class CurrentSenseUITests: XCTestCase {
                                  "Readings panel must be centered horizontally")
         XCTAssertLessThanOrEqual(abs(selectorFrame.midX - screen.midX), 5,
                                  "Mode selector must be centered horizontally")
+        XCTAssertGreaterThan(selectorFrame.minY, 40,
+                             "AC/DC selector must stay below the iPhone camera/Dynamic Island safe area")
     }
 
     func testAppearanceMenuCanSwitchToDarkAndLight() {

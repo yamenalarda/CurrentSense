@@ -10,6 +10,8 @@ struct ContentView: View {
             // Resolve one usable content width and give every control that same width boundary.
             // Do not apply horizontal padding after a screen-width frame; that can enlarge the
             // resulting view beyond the viewport and make the whole composition look shifted.
+            // GeometryReader now occupies the system-safe viewport, not the camera/notch area.
+            // BackgroundView still extends behind the entire display.
             let screenWidth = geometry.size.width
             let screenHeight = geometry.size.height
             let sideInset = min(20, screenWidth * 0.06)
@@ -25,7 +27,7 @@ struct ContentView: View {
                     VStack(alignment: .center, spacing: compact ? 8 : 12) {
                         ModeSelector(selected: vm.mode, onSelect: vm.setMode)
                             .frame(width: min(260, contentWidth))
-                            .padding(.top, 2)
+                            .padding(.top, 10)
 
                         Button(action: vm.toggle) {
                             GlassCircle(phase: vm.snapshot.phase, level: vm.snapshot.level,
@@ -59,8 +61,11 @@ struct ContentView: View {
             .frame(width: screenWidth, height: screenHeight)
             .clipped()
         }
-        // Use the physical display bounds, not the default safe-area inset viewport.
-        .ignoresSafeArea(.all)
+        // The background bleeds edge-to-edge, but the controls stay below the Dynamic Island
+        // and above the home-indicator area. Do not ignore the safe area on this root view.
+        .background {
+            BackgroundView()
+        }
         .statusBarHidden(true)
         .persistentSystemOverlays(.hidden)
         .preferredColorScheme(preferredColorScheme)

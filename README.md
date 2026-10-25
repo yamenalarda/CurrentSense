@@ -57,9 +57,27 @@ If the phone moves or rotates after the baseline is captured, stop and restart t
 - **Calibrated:** use a known current from a trusted clamp meter. Calibration is specific to the cable, phone position, and orientation. Estimates are withheld when the signal is outside the configured validity range.
 - **Ideal wire:** applies the ideal long-straight-conductor approximation. Real appliance cables often contain closely paired outgoing and return conductors whose fields partially cancel, so this method can be substantially inaccurate and should not be treated as a measurement-grade result.
 
+## Repository map
+
+| Path | Contents |
+|---|---|
+| [`.github/workflows/build-ios.yml`](.github/workflows/build-ios.yml) | Automated tests, simulator checks, unsigned IPA build, and artifacts |
+| [`CurrentSense/CurrentSense/UI/`](CurrentSense/CurrentSense/UI/) | SwiftUI screen, AC/DC selector, glass circle, readings panel, and calibration sheet |
+| [`CurrentSense/CurrentSense/Model/`](CurrentSense/CurrentSense/Model/) | Observable view model and saved user preferences |
+| [`CurrentSense/CurrentSense/Sensors/`](CurrentSense/CurrentSense/Sensors/) | Magnetometer and motion-sensor integration |
+| [`CurrentSense/CurrentSense/Engine/`](CurrentSense/CurrentSense/Engine/) | Sensor lifecycle and measurement-engine coordination |
+| [`CurrentSense/CurrentSense/Audio/`](CurrentSense/CurrentSense/Audio/) | Optional audio feedback |
+| [`CurrentSense/Packages/CurrentSenseCore/`](CurrentSense/Packages/CurrentSenseCore/) | Testable AC/DC signal processing, baseline, estimation, and quality checks |
+| [`CurrentSense/CurrentSenseUITests/`](CurrentSense/CurrentSenseUITests/) | Simulator UI regression tests |
+| [`CurrentSense/docs/SCIENCE.md`](CurrentSense/docs/SCIENCE.md) | Assumptions, methods, and known measurement limitations |
+| [`CurrentSense/scripts/`](CurrentSense/scripts/) | Simulator selection, IPA packaging, and verification scripts |
+| [`CurrentSense/project.yml`](CurrentSense/project.yml) | XcodeGen project definition |
+
 ## Architecture
 
-The `Packages/CurrentSenseCore` Swift package contains the measurement models, baseline handling, DC and AC processing, estimation, quality rules, audio mapping, presentation logic, and measurement-pipeline state machine. The app target contains the sensor source, measurement engine, view model, audio feedback, and SwiftUI interface.
+The `Packages/CurrentSenseCore` Swift package contains the measurement models, baseline handling, DC and AC processing, estimation, quality rules, audio mapping, presentation logic, and measurement-pipeline state machine. The app target contains the sensor source, measurement engine, view model, audio feedback, and SwiftUI interface. Historical patch material, when retained, is archived under `CurrentSense/docs/archive/` instead of the repository root.
+
+The main screen uses the iPhone safe-area layout for interactive controls, so AC/DC stays below the Dynamic Island while the background remains edge-to-edge. Appearance can be set to System, Light, or Dark. Where Core Motion attitude data is available, magnetometer vectors are compensated for phone rotation; very fast movement may still briefly suppress readings.
 
 ## Known limitations
 
