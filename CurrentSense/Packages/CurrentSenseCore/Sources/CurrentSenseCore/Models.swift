@@ -16,6 +16,24 @@ public struct Vector3: Equatable, Sendable {
     public var magnitude: Double { squaredMagnitude.squareRoot() }
     public var isFinite: Bool { x.isFinite && y.isFinite && z.isFinite }
 
+    /// Rotate this vector by a unit quaternion (active rotation).
+    public func rotated(by quaternion: Quaternion) -> Vector3 {
+        let n = quaternion.norm
+        guard n > 1e-12, n.isFinite else { return self }
+        let ux = quaternion.x / n
+        let uy = quaternion.y / n
+        let uz = quaternion.z / n
+        let qw = quaternion.w / n
+        let tx = 2 * (uy * z - uz * y)
+        let ty = 2 * (uz * x - ux * z)
+        let tz = 2 * (ux * y - uy * x)
+        return Vector3(
+            x + qw * tx + uy * tz - uz * ty,
+            y + qw * ty + uz * tx - ux * tz,
+            z + qw * tz + ux * ty - uy * tx
+        )
+    }
+
     public static func + (l: Vector3, r: Vector3) -> Vector3 { Vector3(l.x + r.x, l.y + r.y, l.z + r.z) }
     public static func - (l: Vector3, r: Vector3) -> Vector3 { Vector3(l.x - r.x, l.y - r.y, l.z - r.z) }
     public static func * (v: Vector3, s: Double) -> Vector3 { Vector3(v.x * s, v.y * s, v.z * s) }
@@ -36,6 +54,8 @@ public struct Quaternion: Equatable, Sendable {
     public static let identity = Quaternion(x: 0, y: 0, z: 0, w: 1)
 
     public var norm: Double { (x * x + y * y + z * z + w * w).squareRoot() }
+    /// Inverse rotation for unit quaternions.
+    public var conjugate: Quaternion { Quaternion(x: -x, y: -y, z: -z, w: w) }
 
     /// Smallest rotation angle in radians (0...pi) between two orientations.
     /// A degenerate (zero-norm) quaternion yields pi, i.e. "maximally different", which is the
@@ -58,7 +78,7 @@ public struct Quaternion: Equatable, Sendable {
 /// One magnetometer sample. `timestamp` is seconds on a monotonic clock (Core Motion: since boot).
 public struct MagSample: Equatable, Sendable {
     public var timestamp: TimeInterval
-    /// Field in the device frame, microtesla.
+    /// Magnetic field in a session-stable reference frame when attitude compensation is available.
     public var field: Vector3
     /// Gyro/accelerometer-fused attitude (no magnetometer in the fusion), if available.
     public var attitude: Quaternion?

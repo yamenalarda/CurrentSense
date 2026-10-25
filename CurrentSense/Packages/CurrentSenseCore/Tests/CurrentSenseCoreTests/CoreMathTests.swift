@@ -15,6 +15,19 @@ final class CoreMathTests: XCTestCase {
         XCTAssertGreaterThan(abs(abs(scalarDiff) - 3), 0.1, "scalar magnitude difference must differ from the vector delta")
     }
 
+    func testQuaternionRotationCanBeUndone() {
+        let q = Quaternion.axisAngle(axis: Vector3(0, 0, 1), angle: .pi / 2)
+        let original = Vector3(1, 2, 3)
+        let rotated = original.rotated(by: q)
+        XCTAssertEqual(rotated.x, -2, accuracy: 1e-9)
+        XCTAssertEqual(rotated.y, 1, accuracy: 1e-9)
+        XCTAssertEqual(rotated.z, 3, accuracy: 1e-9)
+        let restored = rotated.rotated(by: q.conjugate)
+        XCTAssertEqual(restored.x, original.x, accuracy: 1e-9)
+        XCTAssertEqual(restored.y, original.y, accuracy: 1e-9)
+        XCTAssertEqual(restored.z, original.z, accuracy: 1e-9)
+    }
+
     func testQuaternionAngle() {
         let q = Quaternion.axisAngle(axis: Vector3(0, 0, 1), angle: 10 * .pi / 180)
         XCTAssertEqual(Quaternion.identity.angle(to: q), 10 * .pi / 180, accuracy: 1e-9)

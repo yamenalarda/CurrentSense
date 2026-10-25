@@ -35,8 +35,9 @@ final class CoreMotionSource: MagnetometerSource {
         motion = nil
         lock.unlock()
 
+        let canCompensateAttitude = manager.isDeviceMotionAvailable
         manager.magnetometerUpdateInterval = 1.0 / 100.0
-        if manager.isDeviceMotionAvailable {
+        if canCompensateAttitude {
             manager.deviceMotionUpdateInterval = 1.0 / 50.0
             manager.startDeviceMotionUpdates(using: .xArbitraryZVertical, to: queue) { [weak self] m, _ in
                 guard let self = self, let m = m else { return }
@@ -51,18 +52,23 @@ final class CoreMotionSource: MagnetometerSource {
             guard let self = self else { return }
             if let error = error { onError(error.localizedDescription); return }
             guard let data = data else { return }
-            let b = data.magneticField
+            let b = Vector3(data.magneticField.x, data.magneticField.y, data.magneticField.z)
             self.lock.lock()
             let m = self.motion
             self.lock.unlock()
-            var attitude: Quaternion?
-            var rate: Vector3?
-            if let m = m, abs(data.timestamp - m.t) < 0.2 {   // ignore stale motion data
-                attitude = m.q
-                rate = m.w
+
+            if canCompensateAttitude {
+                // Never mix device-frame and reference-frame samples within one session: a stale
+                // attitude causes this sample to be skipped instead of corrupting the baseline.
+                guard let motion = m, abs(data.timestamp - motion.t) < 0.15 else { return }
+                let stableField = b.rotated(by: motion.q.conjugate)
+                handler(MagSample(timestamp: data.timestamp, field: stableField,
+                                  attitude: .identity, rotationRate: motion.w))
+            } else {
+                // Fallback for devices without device-motion fusion: keep field samples live but
+                // do not claim orientation compensation.
+                handler(MagSample(timestamp: data.timestamp, field: b))
             }
-            handler(MagSample(timestamp: data.timestamp, field: Vector3(b.x, b.y, b.z),
-                              attitude: attitude, rotationRate: rate))
         }
     }
 

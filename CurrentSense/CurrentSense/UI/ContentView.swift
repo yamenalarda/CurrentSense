@@ -42,7 +42,9 @@ struct ContentView: View {
                         .accessibilityIdentifier("measure.button")
 
                         ReadingsPanel(presentation: presentation, mode: vm.mode,
-                                      audioEnabled: $vm.audioEnabled, onSetup: { showSetup = true })
+                                      audioEnabled: $vm.audioEnabled,
+                                      appearancePreference: $vm.appearancePreference,
+                                      onSetup: { showSetup = true })
                             .frame(width: contentWidth)
                     }
                     // The inner column has a fixed, bounded width. Its outer frame occupies the
@@ -61,8 +63,17 @@ struct ContentView: View {
         .ignoresSafeArea(.all)
         .statusBarHidden(true)
         .persistentSystemOverlays(.hidden)
+        .preferredColorScheme(preferredColorScheme)
         .sheet(isPresented: $showSetup) {
             CalibrationSheet().environmentObject(vm)
+        }
+    }
+
+    private var preferredColorScheme: ColorScheme? {
+        switch vm.appearancePreference {
+        case .system: return nil
+        case .light: return .light
+        case .dark: return .dark
         }
     }
 

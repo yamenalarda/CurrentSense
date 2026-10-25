@@ -6,6 +6,25 @@ enum GeometryChoice: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+enum AppearancePreference: String, CaseIterable, Identifiable {
+    case system, light, dark
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .system: return "System"
+        case .light: return "Light"
+        case .dark: return "Dark"
+        }
+    }
+    var symbolName: String {
+        switch self {
+        case .system: return "circle.lefthalf.filled"
+        case .light: return "sun.max"
+        case .dark: return "moon"
+        }
+    }
+}
+
 /// Small persisted preferences. Contains no secrets.
 final class SettingsStore {
     private let defaults = UserDefaults.standard
@@ -13,6 +32,11 @@ final class SettingsStore {
     var audioEnabled: Bool {
         get { defaults.object(forKey: "audioEnabled") as? Bool ?? true }
         set { defaults.set(newValue, forKey: "audioEnabled") }
+    }
+
+    var appearancePreference: AppearancePreference {
+        get { AppearancePreference(rawValue: defaults.string(forKey: "appearancePreference") ?? "") ?? .system }
+        set { defaults.set(newValue.rawValue, forKey: "appearancePreference") }
     }
 
     var geometryChoice: GeometryChoice {

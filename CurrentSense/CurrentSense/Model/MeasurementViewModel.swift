@@ -18,6 +18,9 @@ final class MeasurementViewModel: ObservableObject {
             if !audioEnabled { audio.silence() }
         }
     }
+    @Published var appearancePreference: AppearancePreference {
+        didSet { settings.appearancePreference = appearancePreference }
+    }
 
     private let settings = SettingsStore()
     private let audio = AudioFeedbackService()
@@ -28,6 +31,7 @@ final class MeasurementViewModel: ObservableObject {
     init() {
         snapshot = .cleared(mode: .dc, phase: .idle, session: 0)
         audioEnabled = settings.audioEnabled
+        appearancePreference = settings.appearancePreference
         geometryChoice = settings.geometryChoice
         idealDistanceCm = settings.idealDistanceCm
         calibration = settings.calibration

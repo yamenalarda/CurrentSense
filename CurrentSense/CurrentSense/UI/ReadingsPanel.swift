@@ -5,6 +5,7 @@ struct ReadingsPanel: View {
     let presentation: ReadingsPresentation
     let mode: MeasurementMode
     @Binding var audioEnabled: Bool
+    @Binding var appearancePreference: AppearancePreference
     let onSetup: () -> Void
 
     var body: some View {
@@ -20,6 +21,40 @@ struct ReadingsPanel: View {
                         .font(.footnote)
                         .accessibilityIdentifier("setup.button")
                 }
+                Menu {
+                    Button {
+                        appearancePreference = .system
+                    } label: {
+                        if appearancePreference == .system { Label("System", systemImage: "checkmark") }
+                        else { Text("System") }
+                    }
+                    .accessibilityIdentifier("appearance.option.system")
+
+                    Button {
+                        appearancePreference = .light
+                    } label: {
+                        if appearancePreference == .light { Label("Light", systemImage: "checkmark") }
+                        else { Text("Light") }
+                    }
+                    .accessibilityIdentifier("appearance.option.light")
+
+                    Button {
+                        appearancePreference = .dark
+                    } label: {
+                        if appearancePreference == .dark { Label("Dark", systemImage: "checkmark") }
+                        else { Text("Dark") }
+                    }
+                    .accessibilityIdentifier("appearance.option.dark")
+                } label: {
+                    Image(systemName: appearancePreference.symbolName)
+                        .frame(width: 32, height: 32)
+                        .contentShape(Rectangle())
+                }
+                .fixedSize()
+                .accessibilityLabel("Appearance")
+                .accessibilityValue(appearancePreference.title)
+                .accessibilityIdentifier("appearance.menu")
+
                 Button { audioEnabled.toggle() } label: {
                     Image(systemName: audioEnabled ? "speaker.wave.2" : "speaker.slash")
                         .frame(width: 32, height: 32)

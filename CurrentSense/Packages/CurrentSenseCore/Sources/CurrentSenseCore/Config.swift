@@ -12,8 +12,8 @@ public struct PipelineConfig: Equatable, Sendable {
     public var maxBaselineDrift = 1.0             // µT, first-half vs second-half median difference
     public var sigmaFloor = 0.05                  // µT, assumed minimum per-axis noise (quantisation guard)
     public var maxAcquisitionRotationRate = 0.35  // rad/s (~20 deg/s)
-    public var maxOperatingRotationRate = 0.5     // rad/s
-    public var motionHoldoff = 0.5                // s of rejection after rotation stops
+    public var maxOperatingRotationRate = 1.5     // rad/s; ignore ordinary hand repositioning
+    public var motionHoldoff = 0.18               // brief rejection only after a fast rotation
     public var orientationInvalidationAngle = 0.14 // rad (~8 deg): baseline no longer applicable
     public var baselineMaxAge = 300.0             // s
     public var maxFieldMagnitude = 10_000.0       // µT, anything larger is implausible

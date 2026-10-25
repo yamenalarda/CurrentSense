@@ -22,8 +22,10 @@ enum Palette {
 
 /// True black, edge-to-edge background. The glass disc supplies the only colour accent.
 struct BackgroundView: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
-        Color.black
+        (colorScheme == .dark ? Color.black : Color.white)
             .ignoresSafeArea(.all)
             .accessibilityHidden(true)
     }

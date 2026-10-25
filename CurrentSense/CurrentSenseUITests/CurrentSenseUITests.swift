@@ -44,6 +44,22 @@ final class CurrentSenseUITests: XCTestCase {
                                  "Mode selector must be centered horizontally")
     }
 
+    func testAppearanceMenuCanSwitchToDarkAndLight() {
+        let menu = app.buttons["appearance.menu"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 5))
+        menu.tap()
+        let dark = app.buttons["appearance.option.dark"]
+        XCTAssertTrue(dark.waitForExistence(timeout: 3))
+        dark.tap()
+        XCTAssertEqual(menu.value as? String, "Dark")
+
+        menu.tap()
+        let light = app.buttons["appearance.option.light"]
+        XCTAssertTrue(light.waitForExistence(timeout: 3))
+        light.tap()
+        XCTAssertEqual(menu.value as? String, "Light")
+    }
+
     func testModeSelectorUpdatesImmediately() {
         let ac = app.buttons["mode.ac"], dc = app.buttons["mode.dc"]
         XCTAssertTrue(dc.waitForExistence(timeout: 5))

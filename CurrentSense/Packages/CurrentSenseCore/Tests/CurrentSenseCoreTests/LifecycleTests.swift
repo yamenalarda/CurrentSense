@@ -29,6 +29,20 @@ final class LifecycleTests: XCTestCase {
         XCTAssertEqual(p.currentSnapshot().session, 51)
     }
 
+    func testOrdinaryHandRepositioningDoesNotPauseMeasurement() {
+        var g = Synth()
+        let p = makePipeline(.dc)
+        _ = feed(p, g.samples(from: 0, duration: 3))
+        XCTAssertEqual(p.phase, .measuring)
+
+        // A modest 0.9 rad/s rotation is below the operating rejection threshold.
+        g.rotationRate = Vector3(0.9, 0, 0)
+        let snapshots = feed(p, g.samples(from: 3, duration: 1))
+        XCTAssertFalse(snapshots.isEmpty)
+        XCTAssertTrue(snapshots.contains { $0.phase == .measuring && $0.issue == .none })
+        XCTAssertFalse(snapshots.contains { $0.issue == .holdStill })
+    }
+
     func testModeSwitchClearsWhenIdleAndReacquiresWhenRunning() {
         var g = Synth()
         let p = makePipeline(.dc)
