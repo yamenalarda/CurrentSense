@@ -41,11 +41,11 @@ public enum ReadingsPresenter {
         v < 10 ? String(format: "%.2f \u{00B5}T", v) : String(format: "%.1f \u{00B5}T", v)
     }
 
-    public static func formatCurrent(amps: Double, relativeUncertainty: Double) -> String {
+    public static func formatCurrent(amps: Double, relativeUncertainty: Double, rough: Bool = false) -> String {
         let digits = amps < 1 ? "%.2f" : (amps < 10 ? "%.1f" : "%.0f")
         let value = String(format: digits, amps)
         let pct = Int((relativeUncertainty * 100 / 5).rounded() * 5)
-        return "\u{2248} \(value) A \u{00B1}\(pct)%"
+        return "\u{2248} \(value) A \u{00B1}\(pct)%" + (rough ? " (rough)" : "")
     }
 
     static func confidenceText(_ c: Confidence) -> String {
@@ -64,7 +64,8 @@ public enum ReadingsPresenter {
             var current = dash
             if let e = s.currentEstimate {
                 switch e {
-                case .available(let a, let u, _): current = formatCurrent(amps: a, relativeUncertainty: u)
+                case .available(let a, let u, let basis):
+                    current = formatCurrent(amps: a, relativeUncertainty: u, rough: basis == .idealSingleConductor)
                 case .unavailable: current = s.phase == .idle ? dash : "Unavailable"
                 }
             }
@@ -83,8 +84,10 @@ public enum ReadingsPresenter {
                 case .strong: strength = "Strong"
                 }
             }
+            let activity = s.acRatio.map { String(format: "%.1f\u{00D7} background", $0) } ?? dash
             return [ReadingRow(id: "field", label: "Field", value: field),
                     ReadingRow(id: "strength", label: "Strength", value: strength),
+                    ReadingRow(id: "activity", label: "Activity", value: activity),
                     ReadingRow(id: "quality", label: "Signal quality", value: confidenceText(s.confidence))]
         }
     }
@@ -116,7 +119,10 @@ public enum ReadingsPresenter {
                          : "No AC magnetic activity detected. This does not prove a conductor is safe."
             }
             switch s.currentEstimate {
-            case .available: return "Estimate assumes the selected calibration or geometry."
+            case .available(_, _, let basis):
+                return basis == .idealSingleConductor
+                    ? "Rough estimate: assumes one straight wire at the set distance. Cables with phase and neutral together usually carry more than shown."
+                    : "Estimate valid only at the calibrated position."
             case .unavailable(let r)?:
                 switch r {
                 case .notCalibrated: return "Switch the load on. A current needs a calibration or geometry model."

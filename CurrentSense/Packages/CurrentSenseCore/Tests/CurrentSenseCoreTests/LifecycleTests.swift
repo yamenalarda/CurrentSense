@@ -120,5 +120,9 @@ final class LifecycleTests: XCTestCase {
         XCTAssertEqual(m.update(level: 0, active: true, dt: 0.1).amplitude, 0)
         XCTAssertLessThanOrEqual(a.amplitude, 0.2)
     }
+    func testRoughCurrentIsLabelled() {
+        XCTAssertEqual(ReadingsPresenter.formatCurrent(amps: 2.04, relativeUncertainty: 0.32, rough: true),
+                       "≈ 2.0 A ±30% (rough)")
+        XCTAssertFalse(ReadingsPresenter.formatCurrent(amps: 2, relativeUncertainty: 0.1).contains("rough"))
+    }
 }
-

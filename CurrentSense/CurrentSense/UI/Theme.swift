@@ -31,14 +31,20 @@ struct BackgroundView: View {
                            ? [Color(red: 0.03, green: 0.04, blue: 0.09), Color(red: 0.08, green: 0.06, blue: 0.17)]
                            : [Color(red: 0.91, green: 0.95, blue: 1.00), Color(red: 0.96, green: 0.93, blue: 1.00)],
                            startPoint: .top, endPoint: .bottom)
-            ZStack {
-                Circle().fill(Color.blue.opacity(dark ? 0.35 : 0.26)).frame(width: 320).offset(x: -120, y: -230)
-                Circle().fill(Color.purple.opacity(dark ? 0.32 : 0.20)).frame(width: 300).offset(x: 150, y: 40)
-                Circle().fill(Color.orange.opacity(dark ? 0.16 : 0.16)).frame(width: 260).offset(x: -70, y: 300)
-            }
-            .blur(radius: 80)
-            .drawingGroup()
+            // Radial-gradient blobs instead of blur()+drawingGroup(): drawingGroup rasterised the blurred
+            // blobs inside a fixed rectangle, which showed up as a hard-edged coloured square.
+            blob(.blue, dark ? 0.55 : 0.40, 460).offset(x: -120, y: -230)
+            blob(.purple, dark ? 0.50 : 0.30, 440).offset(x: 150, y: 40)
+            blob(.orange, dark ? 0.30 : 0.28, 380).offset(x: -70, y: 300)
         }
         .ignoresSafeArea()
+    }
+
+    private func blob(_ color: Color, _ opacity: Double, _ size: CGFloat) -> some View {
+        Circle()
+            .fill(RadialGradient(colors: [color.opacity(opacity), color.opacity(0)],
+                                 center: .center, startRadius: 0, endRadius: size / 2))
+            .frame(width: size, height: size)
+            .allowsHitTesting(false)
     }
 }

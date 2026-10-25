@@ -42,8 +42,8 @@ public struct PipelineConfig: Equatable, Sendable {
     public var acRMSWindow = 1.0
     public var acMinSpan = 0.5
     public var acNoiseFloorMin = 0.03             // µT
-    public var acEnterRatio = 2.0
-    public var acExitRatio = 1.5
+    public var acEnterRatio = 1.8
+    public var acExitRatio = 1.4
     public var acEnterDwell = 0.3
     public var acExitDwell = 0.5
     public var acModerateRatio = 4.0

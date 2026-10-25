@@ -16,7 +16,7 @@ final class SettingsStore {
     }
 
     var geometryChoice: GeometryChoice {
-        get { GeometryChoice(rawValue: defaults.string(forKey: "geometryChoice") ?? "") ?? .off }
+        get { GeometryChoice(rawValue: defaults.string(forKey: "geometryChoice") ?? "") ?? .idealWire }
         set { defaults.set(newValue.rawValue, forKey: "geometryChoice") }
     }
 

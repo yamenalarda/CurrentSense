@@ -78,6 +78,8 @@ struct GlassCircle: View {
     private func glass(side: CGFloat, tint: Color) -> some View {
         let dark = scheme == .dark
         return ZStack {
+            Circle().fill(tint.opacity(dark ? 0.40 : 0.28))   // soft glow behind the glass (replaces .shadow)
+                .blur(radius: side * 0.09).scaleEffect(0.96).offset(y: side * 0.04)
             Circle().fill(.ultraThinMaterial)
             Circle().fill(RadialGradient(colors: [tint.opacity(dark ? 0.55 : 0.45), tint.opacity(0.12)],
                                          center: UnitPoint(x: 0.35, y: 0.30), startRadius: 0, endRadius: side * 0.75))
@@ -98,7 +100,6 @@ struct GlassCircle: View {
                                                            .white.opacity(0.08), .white.opacity(0.9)], center: .center),
                                   lineWidth: max(1.5, side * 0.006))
         }
-        .compositingGroup()
-        .shadow(color: tint.opacity(dark ? 0.45 : 0.30), radius: side * 0.09, y: side * 0.05)
+
     }
 }
