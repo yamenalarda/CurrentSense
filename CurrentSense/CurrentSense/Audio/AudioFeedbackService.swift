@@ -114,7 +114,7 @@ final class AudioFeedbackService {
                     phase += 2 * Double.pi * freq / sr
                     if phase > 2 * Double.pi { phase -= 2 * Double.pi }
                     let v = Float(sin(phase) * amp)
-                    for b in buffers { b.mutableData?.assumingMemoryBound(to: Float.self)[frame] = v }
+                    for b in buffers { b.mData?.assumingMemoryBound(to: Float.self)[frame] = v }
                 }
                 return noErr
             }
